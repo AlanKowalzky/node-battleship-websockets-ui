@@ -1,0 +1,10 @@
+// c:\progNodeJS\node-battleship\src\utils.ts
+import { SafeParseResult } from "./types/websocket";
+
+export function safeJsonParse<T>(jsonString: string): SafeParseResult<T> {
+  try {
+    return { success: true, data: JSON.parse(jsonString) };
+  } catch (error) {
+    return { success: false, error };
+  }
+}

@@ -1,0 +1,136 @@
+import WebSocket from 'ws';
+import * as playerStore from '../playerStore';
+import * as roomManager from '../roomManager'; // Dodajemy roomManager
+import { ClientMessage } from '../types/websocket';
+import { sendMessageToClient, sendUpdateWinners, sendUpdateRoom } from './index'; // Dodajemy sendUpdateRoom
+
+// Definicja typów dla danych oczekiwanych przez różne komendy
+interface RegData { name: string; password: string; }
+interface AddUserToRoomData { indexRoom: number; }
+export function handleWebSocketMessage(
+  client: WebSocket,
+  parsedMessage: ClientMessage,
+  wss: WebSocket.Server
+): void {
+  const { type, data, id } = parsedMessage;
+  let responseData: any;
+  let responseType = type;
+  let shouldSendUpdateWinners = false;
+  let shouldSendUpdateRoom = false;
+
+  console.log(
+    `[MessageHandler] Processing command: ${type}, ID: ${id}, Raw Data: ${data}`
+  );
+
+  try {
+    switch (type) {
+      case 'reg': {
+        if (!data) {
+          throw new Error('Data for "reg" command is missing.');
+        }
+        const { name, password } = JSON.parse(data) as RegData;
+        const result = playerStore.registerOrLoginPlayer(name, password);
+
+        if (result.error) {
+          responseData = { name, index: -1, error: true, errorText: result.error };
+        } else if (result.player) {
+          const player = result.player;
+          responseData = { name: player.name, index: player.id, error: false, errorText: '' };
+          client.playerId = player.id;
+          client.playerName = player.name;
+          shouldSendUpdateWinners = true;
+          shouldSendUpdateRoom = true; // Po zalogowaniu wyślij też listę pokoi
+          console.log(`[MessageHandler] Player ${player.name} (ID: ${player.id}) registered/logged in.`);
+        }
+        break;
+      }
+
+      case 'create_room': {
+        if (client.playerId === undefined || client.playerName === undefined) {
+          responseData = { error: true, errorText: 'Player not registered/logged in' };
+          responseType = 'create_room'; // Odpowiedź na create_room, ale z błędem
+        } else {
+          const newRoom = roomManager.createRoom(client.playerId, client.playerName, client);
+          // Odpowiedź do klienta tworzącego pokój nie jest zdefiniowana w specyfikacji,
+          // ale możemy wysłać potwierdzenie lub nic nie wysyłać bezpośrednio,
+          // ponieważ update_room poinformuje o nowym pokoju.
+          // responseData = { roomId: newRoom.id }; // Opcjonalnie
+          shouldSendUpdateRoom = true;
+        }
+        break;
+      }
+
+      case 'add_user_to_room': {
+        if (client.playerId === undefined || client.playerName === undefined) {
+          responseData = { error: true, errorText: 'Player not registered/logged in' };
+          responseType = 'add_user_to_room'; // Odpowiedź na add_user_to_room, ale z błędem
+        } else {
+          if (!data) {
+            throw new Error('Data for "add_user_to_room" command is missing.');
+          }
+          const { indexRoom } = JSON.parse(data) as AddUserToRoomData;
+          const result = roomManager.addUserToRoom(indexRoom, client.playerId, client.playerName, client);
+
+          if (result.error) {
+            responseData = { error: true, errorText: result.error };
+            responseType = 'add_user_to_room';
+          } else if (result.room) {
+            // Jeśli pokój jest pełny, create_game zostanie wysłane poniżej
+            // Nie ma specyficznej odpowiedzi dla add_user_to_room, jeśli się powiedzie,
+            // klient dowie się o tym przez create_game lub update_room.
+            // responseData = { message: "Successfully joined room" }; // Opcjonalnie
+            shouldSendUpdateRoom = true;
+          }
+        }
+        break;
+      }
+
+      default:
+        responseData = { message: `Received and processed command: ${type}` };
+        console.log(`[MessageHandler] Unknown command type: ${type}`);
+        break;
+    }
+    
+    if (responseData) {
+      sendMessageToClient(client, responseType, responseData, id);
+      console.log(`[MessageHandler] Sent response for command ${responseType}, ID: ${id}, Response Data: ${JSON.stringify(responseData)}`);
+    }
+
+    // Sprawdź, czy pokój jest pełny po dodaniu gracza i wyślij create_game
+    if (type === 'add_user_to_room' && responseType !== 'error' && responseData?.error !== true) {
+        if (!data) return; // Już obsłużone, ale dla pewności
+        const { indexRoom } = JSON.parse(data) as AddUserToRoomData;
+        const room = roomManager.getRoomById(indexRoom);
+        if (room && room.status === 'ready' && room.users.length === 2 && room.gameId !== undefined) {
+            console.log(`[MessageHandler] Room ${room.id} is full. Starting game ${room.gameId}.`);
+            room.users.forEach(userInRoom => {
+                if (userInRoom.ws && userInRoom.gamePlayerId !== undefined) {
+                    sendMessageToClient(userInRoom.ws, 'create_game', {
+                        idGame: room.gameId,
+                        idPlayer: userInRoom.gamePlayerId,
+                    });
+                    console.log(`[MessageHandler] Sent create_game to player ${userInRoom.name} (ID: ${userInRoom.index}) in game ${room.gameId} with gamePlayerId ${userInRoom.gamePlayerId}`);
+                }
+            });
+            roomManager.removeRoom(room.id); // Usuń pokój z listy dostępnych
+            shouldSendUpdateRoom = true; // Upewnij się, że update_room zostanie wysłany
+        }
+    }
+
+    if (shouldSendUpdateWinners) {
+      sendUpdateWinners(wss);
+      console.log('[MessageHandler] Triggered update_winners broadcast.');
+    }
+    if (shouldSendUpdateRoom) {
+      sendUpdateRoom(wss);
+      console.log('[MessageHandler] Triggered update_room broadcast.');
+    }
+
+  } catch (error) {
+    console.error(`[MessageHandler] Error processing message type ${type}:`, error);
+    // W przypadku błędu parsowania lub innego, wyślij odpowiedź błędu dla oryginalnego typu komendy, jeśli to możliwe
+    // lub ogólny błąd.
+    const errorText = error instanceof Error ? error.message : 'Unknown error processing request';
+    sendMessageToClient(client, type, { error: true, errorText }, id);
+  }
+}

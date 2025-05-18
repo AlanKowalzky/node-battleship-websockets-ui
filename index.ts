@@ -1,5 +1,5 @@
 import { httpServer } from "./src/http_server/index.js"; // Upewnij się, że ścieżka jest poprawna
-import { createWebSocketServer } from "./src/http_server/webSocketService.js"; // Upewnij się, że ścieżka jest poprawna
+import { createWebSocketServer } from "./src/websocket/index.js"; // Upewnij się, że ścieżka jest poprawna
 import type { WebSocketServer as WebSocketServerType, WebSocket } from 'ws'; // Import typów dla WebSocket
 import dotenv from 'dotenv';
 
