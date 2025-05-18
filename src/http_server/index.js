@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as http from 'http';
-import { createWebSocketServer } from './webSocketService.js';
+// Usunięto import createWebSocketServer, ponieważ inicjalizacja będzie w index.ts
 
 export const httpServer = http.createServer(function (req, res) {
   // Sprawdź, czy to żądanie uaktualnienia do WebSocket.
@@ -27,6 +27,3 @@ export const httpServer = http.createServer(function (req, res) {
     res.end(data);
   });
 });
-
-// Utwórz i podłącz serwer WebSocket
-createWebSocketServer(httpServer);
