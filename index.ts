@@ -1,6 +1,18 @@
-import { httpServer } from './src/http_server/index.js';
+import http from 'http';
+import { createWebSocketServer } from './src/http_server/webSocketService.js';
 
-const HTTP_PORT = 8181;
+const httpServer = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Hello World\n');
+});
 
-console.log(`Start static http server on the ${HTTP_PORT} port!`);
-httpServer.listen(HTTP_PORT);
+const PORT = process.env.PORT || 8181;
+
+httpServer.listen(PORT, () => {
+  console.log(`HTTP Server running on port ${PORT}`);
+});
+
+// Inicjalizacja WebSocket servera
+createWebSocketServer(httpServer).catch(error => {
+  console.error('Failed to initialize WebSocket server:', error);
+});

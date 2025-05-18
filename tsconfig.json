@@ -1,26 +1,25 @@
 {
   "compilerOptions": {
-    "target": "ES2022", // lub nowszy, np. "ESNext"
-    "module": "ESNext", // lub "NodeNext" jeśli używasz najnowszych ficzerów Node.js z ESM
-    "moduleResolution": "bundler", // lub "NodeNext" lub "Node"
-    "rootDir": "./", // Katalog główny z kodem źródłowym
-    "outDir": "./dist", // Katalog, do którego kompilowany będzie JS (jeśli kompilujesz)
-    "esModuleInterop": true, // Umożliwia domyślne importy z modułów CommonJS
-    "forceConsistentCasingInFileNames": true, // Wymusza spójność wielkości liter w nazwach plików
-    "strict": true, // Włącza wszystkie ścisłe opcje sprawdzania typów
-    "skipLibCheck": true, // Pomija sprawdzanie typów w plikach deklaracji (.d.ts)
-    "resolveJsonModule": true, // Pozwala na importowanie plików .json
-    "baseUrl": ".", // Ustawia bazowy URL dla rozwiązywania ścieżek modułów
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": "./",
+    "outDir": "./dist",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
     "paths": {
-      // Opcjonalne aliasy ścieżek
       "*": ["node_modules/*"]
     },
-    "allowJs": true // Pozwala na kompilację plików JavaScript (przydatne przy migracji)
+    "allowJs": true,
+    "typeRoots": ["./node_modules/@types"]
   },
   "include": [
-    // Pliki i katalogi do uwzględnienia w kompilacji
-    "index.ts", // Zakładając, że masz taki plik
+    "index.ts",
     "src/**/*.ts"
   ],
-  "exclude": ["node_modules", "dist", "front"] // Pliki i katalogi do wykluczenia
+  "exclude": ["node_modules", "dist", "front"]
 }
