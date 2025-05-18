@@ -1,6 +1,6 @@
 import WebSocket from 'ws';
 
-const SERVER_URL = 'ws://localhost:8181'; // Upewnij się, że port jest taki sam jak serwera
+const SERVER_URL = 'ws://localhost:3000'; // Upewnij się, że port jest taki sam jak serwera
 
 console.log(`Attempting to connect to WebSocket server at ${SERVER_URL}`);
 const ws = new WebSocket(SERVER_URL);
