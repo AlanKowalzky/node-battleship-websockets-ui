@@ -1,7 +1,10 @@
 import { httpServer } from "./src/http_server/index.js"; // Upewnij się, że ścieżka jest poprawna
 import { createWebSocketServer } from "./src/http_server/webSocketService.js"; // Upewnij się, że ścieżka jest poprawna
 import type { WebSocketServer as WebSocketServerType, WebSocket } from 'ws'; // Import typów dla WebSocket
+import dotenv from 'dotenv';
 
+// Załaduj zmienne środowiskowe z pliku .env
+dotenv.config();
 const HTTP_PORT = process.env.HTTP_PORT || 8181;
 
 console.log(`Attempting to start HTTP server on port ${HTTP_PORT}...`);
