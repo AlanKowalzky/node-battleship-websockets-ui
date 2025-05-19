@@ -265,16 +265,20 @@ export function handleWebSocketMessage(
           responseType = 'attack';
           break;
         }
-        const player1 = game.players[0];
-        const player2 = game.players[1];
-        if (!player1.ws || !player2.ws) {
+
+        // Sprawdź, czy ludzki przeciwnik jest połączony
+        const opponent = game.players.find(p => p.playerId !== client.playerId);
+        if (opponent && !opponent.isBot && !opponent.ws) {
           console.warn(
-            `[MessageHandler] Attack in game ${gameId} aborted, one player disconnected.`
+            `[MessageHandler] Attack in game ${gameId} aborted, human opponent ${opponent.playerName} (ID: ${opponent.playerId}) disconnected.`
           );
           responseData = { error: true, errorText: 'Opponent disconnected' };
           responseType = 'attack';
           break;
         }
+
+        // Dodatkowe sprawdzenie: upewnij się, że atakujący gracz (klient) ma aktywne połączenie
+        // Chociaż jest to mniej prawdopodobne, bo właśnie wysłał komendę.
         attackResultDetailsFromSwitch = gameManager.handleAttack(
           gameId,
           client.playerId,
@@ -327,16 +331,19 @@ export function handleWebSocketMessage(
           responseType = 'randomAttack';
           break;
         }
-        const player1 = game.players[0];
-        const player2 = game.players[1];
-        if (!player1.ws || !player2.ws) {
+
+        // Sprawdź, czy ludzki przeciwnik jest połączony
+        const opponentInRandomAttack = game.players.find(p => p.playerId !== client.playerId);
+        if (opponentInRandomAttack && !opponentInRandomAttack.isBot && !opponentInRandomAttack.ws) {
           console.warn(
-            `[MessageHandler] RandomAttack in game ${gameId} aborted, one player disconnected.`
+            `[MessageHandler] RandomAttack in game ${gameId} aborted, human opponent ${opponentInRandomAttack.playerName} (ID: ${opponentInRandomAttack.playerId}) disconnected.`
           );
           responseData = { error: true, errorText: 'Opponent disconnected' };
           responseType = 'randomAttack';
           break;
         }
+        // Dodatkowe sprawdzenie dla atakującego gracza (klienta) nie jest tu tak krytyczne,
+        // bo handleRandomAttack nie używa bezpośrednio client.ws.
 
         attackResultDetailsFromSwitch = gameManager.handleRandomAttack(
           gameId,
