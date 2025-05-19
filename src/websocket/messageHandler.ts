@@ -380,7 +380,8 @@ export function handleWebSocketMessage(
       // Ponieważ randomAttack już zwraca AttackResultDetails, możemy jej użyć.
 
       const game = gameManager.getGameById(gameId);
-      if (!game || game.status === 'pending_ships' || game.status === 'finished') {
+      // if (!game || game.status === 'pending_ships' || game.status === 'finished') {
+        if (!game || game.status === 'pending_ships' || game.status === 'finished') {
           console.warn(`[MessageHandler] Bot turn attempted for game ${gameId} but game not found or not playing.`);
           return; // Gra już nie istnieje lub nie jest aktywna
       }
@@ -406,13 +407,17 @@ export function handleWebSocketMessage(
 
       // Logika wysyłania wiadomości 'attack', 'turn', 'finish' po ataku bota
       // Jest taka sama jak dla gracza ludzkiego, więc możemy ją wywołać.
+      // WAŻNE: game.status mógł zostać zmieniony przez handleRandomAttack.
+      // Używamy rzutowania typu, aby TypeScript wiedział, że sprawdzamy ponownie pełny zakres statusów.
+      const currentStatusAfterAttack = game.status as gameManager.Game['status'];
+
       // Wiadomość 'attack' (od bota) do gracza ludzkiego
       const attackMessagePayload: any = {
         position: { x: botAttackResultDetails.coordinates.x, y: botAttackResultDetails.coordinates.y },
         currentPlayer: botAttackResultDetails.attackingPlayerId, // ID bota
         status: botAttackResultDetails.result,
       };
-      if (botAttackResultDetails.shipKilled) {
+      if (botAttackResultDetails.shipKilled) { // This check is fine
         attackMessagePayload.ship = botAttackResultDetails.shipKilled;
       }
       // Wysyłamy tylko do gracza ludzkiego (bot nie ma ws)
@@ -423,7 +428,7 @@ export function handleWebSocketMessage(
       }
 
       // Logika 'finish' lub 'turn' po ataku bota
-      if (game.status === 'finished' && game.winner !== undefined) {
+      if (currentStatusAfterAttack === 'finished' && game.winner !== undefined) {
         const winnerId = game.winner;
         const finishPayload = { winPlayer: winnerId };
         // Wysyłamy tylko do gracza ludzkiego
@@ -435,7 +440,7 @@ export function handleWebSocketMessage(
         // playerStore.incrementWins(winnerId); // Jeśli bot ma wpis w playerStore
         shouldSendUpdateWinners = true; // Trigger broadcast do wszystkich
         gameManager.removeGame(game.gameId);
-      } else if (game.status === 'playing') {
+      } else if (currentStatusAfterAttack === 'playing') {
         const turnPayload = { currentPlayer: game.players[game.currentPlayerIndex].playerId };
          // Wysyłamy tylko do gracza ludzkiego
         if (humanPlayer?.ws) {
@@ -449,7 +454,7 @@ export function handleWebSocketMessage(
                  handleBotTurn(game.gameId, botPlayerId, wss);
              });
         }
-      } else if (game.status === 'pending_ships') {
+      } else if (currentStatusAfterAttack === 'pending_ships') {
         console.log(`[MessageHandler] Game ${game.gameId} is still waiting for ships to be placed.`);
       }
        // Trigger broadcast update_winners jeśli flaga została ustawiona w bloku finish

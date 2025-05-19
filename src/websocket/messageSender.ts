@@ -2,18 +2,20 @@ import * as WS_NAMESPACE from 'ws';
 
 // Funkcja pomocnicza do tworzenia stringu wiadomości WebSocket
 function createFinalWebSocketMessage(type: string, rawData: any, id: number = 0): string {
-  let dataFieldPayload: string;
+  let dataFieldPayload: string; // Zmienna do przechowywania stringifikowanego rawData
 
   try {
+    // Stringifikuj rawData. Jeśli rawData to undefined, JSON.stringify(null) da "null".
     dataFieldPayload = JSON.stringify(rawData ?? null);
   } catch (e) {
+    // W razie błędu stringifikacji (np. cykliczne referencje), wyślij "null" jako bezpieczny fallback.
     console.error("Error stringifying data for WebSocket message:", e, "Original data:", rawData);
     dataFieldPayload = JSON.stringify(null);
   }
 
   return JSON.stringify({
     type,
-    data: dataFieldPayload,
+    data: dataFieldPayload, // dataFieldPayload jest teraz stringiem JSON
     id,
   });
 }

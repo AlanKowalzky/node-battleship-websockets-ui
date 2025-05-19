@@ -100,19 +100,17 @@ export function addUserToRoom(roomId: number, userId: number, userName: string, 
   return { room };
 }
 
-export function getAvailableRooms(): ClientRoom[] {
+export function getAvailableRooms(): { roomId: number; roomUsers: { name: string; index: number; }[] }[] {
   // Zwróć tylko pokoje ze statusem 'waiting' (1 gracz)
   const availableRooms = Array.from(rooms.values()).filter(room => room.status === 'waiting');
   return availableRooms.map(room => ({
-    id: room.id,
-    users: room.users.map(user => ({ // Mapuj RoomUser do ClientRoomUser, omijając 'ws'
+    roomId: room.id, // Zgodnie ze specyfikacją: roomId
+    roomUsers: room.users.map(user => ({ // Zgodnie ze specyfikacją: roomUsers
       name: user.name,
       index: user.index,
-      gameId: user.gameId,
-      gamePlayerId: user.gamePlayerId,
+      // Usuwamy dodatkowe pola gameId i gamePlayerId, aby ściśle pasować do specyfikacji update_room
     })),
-    status: room.status,
-    gameId: room.gameId,
+    // Usuwamy dodatkowe pola status i gameId z obiektu pokoju dla update_room
   }));
 }
 
