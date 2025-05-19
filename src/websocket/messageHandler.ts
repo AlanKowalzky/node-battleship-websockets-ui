@@ -71,6 +71,7 @@ export function handleWebSocketMessage(
       }
 
       case 'create_single_player_game': {
+        console.log(`[MessageHandler] Received create_single_player_game command from player ID: ${client.playerId}`);
         if (client.playerId === undefined || client.playerName === undefined) {
           responseData = { error: true, errorText: 'Player not registered/logged in' };
           responseType = 'create_single_player_game';
@@ -86,10 +87,12 @@ export function handleWebSocketMessage(
           const gameId = roomManager.getNextGameId(); // Użyj funkcji z roomManager do pobrania unikalnego ID gry
           const newGame = gameManager.createNewGame(gameId, humanPlayerForGame, botPlayer);
 
+          console.log(`[MessageHandler] Game ${gameId} created for single player mode.`);
           // Bot rozmieszcza statki
           const botShips = bot.placeBotShips();
           gameManager.addShipsToGame(gameId, botPlayerId, botShips);
 
+          console.log(`[MessageHandler] Bot ships placed and added to game ${gameId}.`);
           // Gracz ludzki musi jeszcze rozmieścić statki (komenda add_ships)
           // Wyślij wiadomość create_game do gracza ludzkiego
           sendMessageToClient(client, 'create_game', {
@@ -97,7 +100,7 @@ export function handleWebSocketMessage(
             // W grze 1vBot, gracz ludzki jest zawsze pierwszy (index 0) lub drugi (index 1)
             // i jego gamePlayerId (1 lub 2) jest determinowane przez jego pozycję w tablicy.
             // gameManager.createNewGame losuje, kto zaczyna (currentPlayerIndex),
-            // ale idPlayer w create_game powinno być stałe dla gracza.
+            // ale idPlayer w create_game powinno być stałe dla gracza ludzkiego w tej grze.
             // Załóżmy, że gracz ludzki to player1Input w createNewGame, więc jego gamePlayerId to 1.
             // Lub, jeśli bot jest zawsze player2Input, to gamePlayerId gracza ludzkiego to 1.
             // Dla uproszczenia, przypiszmy graczowi ludzkiemu idPlayer = 1 w grze z botem.
@@ -150,6 +153,7 @@ export function handleWebSocketMessage(
           } else {
             const result = gameManager.addShipsToGame(gameId, client.playerId, ships);
             if (result.error) {
+              console.error(`[MessageHandler] Error adding ships for player ${client.playerId} in game ${gameId}: ${result.error}`);
               responseData = { error: true, errorText: result.error };
               responseType = 'add_ships';
             } // Jeśli sukces, odpowiedź zostanie wysłana w bloku 'start_game' poniżej
@@ -292,6 +296,7 @@ export function handleWebSocketMessage(
     // Sprawdź, czy gra może się rozpocząć po dodaniu statków
     if (type === 'add_ships' && responseType !== 'error' && responseData?.error !== true) {
       if (!data) return;
+      console.log(`[MessageHandler] Checking if game can start after add_ships from player ${client.playerId}.`);
       const { gameId } = JSON.parse(data) as AddShipsData;
       const game = gameManager.getGameById(gameId);
       if (game && game.status === 'playing') {
@@ -306,6 +311,14 @@ export function handleWebSocketMessage(
               currentPlayer: game.players[game.currentPlayerIndex].playerId,
             });
             console.log(`[MessageHandler] Sent start_game and turn to player ${player.playerName} (ID: ${player.playerId})`);
+            // Jeśli po wysłaniu start_game i turn, aktualnym graczem jest bot, wywołaj jego turę
+            const currentPlayerAfterStart = game.players[game.currentPlayerIndex];
+            if (currentPlayerAfterStart.isBot && currentPlayerAfterStart.playerId === game.players[game.currentPlayerIndex].playerId) {
+                console.log(`[MessageHandler] Bot (ID: ${currentPlayerAfterStart.playerId}) starts the game ${game.gameId}. Triggering bot move.`);
+                setImmediate(() => {
+                    handleBotTurn(game.gameId, currentPlayerAfterStart.playerId, wss);
+                });
+            }
           }
         });
         // Gra się rozpoczęła, nie ma potrzeby wysyłać update_room, bo pokój już został usunięty
@@ -476,5 +489,7 @@ export function handleWebSocketMessage(
     console.error(`[MessageHandler] Error processing message type ${type}:`, error);
     const errorText = error instanceof Error ? error.message : 'Unknown error processing request';
     sendMessageToClient(client, type, { error: true, errorText }, id);
+  } finally {
+    console.log(`------------------------------------- Message Handling End (Type: ${type}) -------------------------------------`);
   }
 }

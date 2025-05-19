@@ -100,15 +100,22 @@ export function addShipsToGame(gameId: number, playerId: number, ships: Ship[]):
 }
 
 function getShipAtCoordinates(coordinates: { x: number; y: number }, ships: Ship[]): Ship | undefined {
+  console.log(`[getShipAtCoordinates] Checking for ship at Target Coords: (${coordinates.x}, ${coordinates.y})`);
+  // console.log(`[getShipAtCoordinates] Full ships array being checked: ${JSON.stringify(ships, null, 2)}`); // Można odkomentować dla pełnego obrazu
+
   for (const ship of ships) {
+    console.log(`[getShipAtCoordinates] Iterating ship: type=${ship.type}, len=${ship.length}, pos=(${ship.position.x},${ship.position.y}), dir=${ship.direction}`);
     for (let i = 0; i < ship.length; i++) {
       const shipX = ship.position.x + (ship.direction ? i : 0);
       const shipY = ship.position.y + (ship.direction ? 0 : i);
+      // console.log(`[getShipAtCoordinates]   Ship segment ${i}: (${shipX}, ${shipY})`); // Mniej gadatliwe, odkomentuj w razie potrzeby
       if (shipX === coordinates.x && shipY === coordinates.y) {
-        return ship;
+        console.log(`[getShipAtCoordinates]   >>> HIT on ship type ${ship.type} at segment ${i} (${shipX},${shipY})! Target Coords: (${coordinates.x},${coordinates.y})`);
+        return ship; // Znaleziono statek
       }
     }
   }
+  console.log(`[getShipAtCoordinates]   >>> MISS. No ship segment found at Target Coords: (${coordinates.x}, ${coordinates.y})`);
   return undefined;
 }
 
@@ -181,6 +188,8 @@ export function handleAttack(
   coordinates: { x: number; y: number }
 ): AttackResultDetails {
   const game = activeGames.get(gameId);
+  console.log(`\n[handleAttack] ========= NEW ATTACK SEQUENCE START =========`);
+  console.log(`[handleAttack] GameID: ${gameId}, AttackerID: ${attackingPlayerId}, TargetCoords: (${coordinates.x},${coordinates.y})`);
   if (!game) return { error: 'Game not found' } as AttackResultDetails;
   if (game.status !== 'playing') return { error: 'Game is not active' } as AttackResultDetails;
 
@@ -194,6 +203,7 @@ export function handleAttack(
 
   const defendingPlayerIndex = 1 - attackingPlayerIndex;
   const defendingPlayer = game.players[defendingPlayerIndex];
+  console.log(`[handleAttack] DefendingPlayerID: ${defendingPlayer.playerId}. Ships on their board BEFORE check: ${JSON.stringify(defendingPlayer.board.ships, null, 2)}`);
 
   if (!defendingPlayer.board) return { error: 'Defending player board not set up' } as AttackResultDetails;
 
@@ -206,10 +216,13 @@ export function handleAttack(
   let turnChanged = true;
 
   const hitShip = getShipAtCoordinates(coordinates, defendingPlayer.board.ships);
+  console.log(`[handleAttack] Result from getShipAtCoordinates: ${hitShip ? `HIT on ship type ${hitShip.type}` : 'MISS (returned undefined)'}`);
 
   if (hitShip) {
     attackResult = 'shot';
     turnChanged = false; // Player continues turn on hit
+    console.log(`[handleAttack] HIT confirmed by handleAttack. turnChanged is now: ${turnChanged}. Player ${attackingPlayerId} continues turn.`);
+    console.log(`[handleAttack] Details of hit ship (as returned by getShipAtCoordinates): ${JSON.stringify(hitShip, null, 2)}`);
 
     // Record the shot
     defendingPlayer.board.shotsReceived.push({ x: coordinates.x, y: coordinates.y, result: 'shot' });
@@ -247,10 +260,12 @@ export function handleAttack(
 
   if (turnChanged && game.status === 'playing') {
     game.currentPlayerIndex = defendingPlayerIndex;
+  console.log(`[handleAttack] Turn will change. New currentPlayerIndex: ${game.currentPlayerIndex} (Player ID: ${game.players[game.currentPlayerIndex].playerId})`);
   }
   const nextPlayerId = game.players[game.currentPlayerIndex].playerId;
 
-  console.log(`[GameManager] Attack in game ${gameId} by ${attackingPlayerId} at (${coordinates.x},${coordinates.y}): ${attackResult}. Turn changed: ${turnChanged}. Next player: ${nextPlayerId}`);
+  console.log(`[handleAttack] Final outcome: Result=${attackResult}, TurnChanged=${turnChanged}, NextPlayer=${nextPlayerId}`);
+  console.log("------------------------------------- Attack Sequence End -------------------------------------");
   return { gameId, attackingPlayerId, coordinates, result: attackResult, shipKilled, turnChanged, nextPlayerId, winner };
 }
 
@@ -290,7 +305,9 @@ export function handleRandomAttack(
 
   console.log(`[GameManager] Random attack for player ${attackingPlayerId} in game ${gameId} chose coordinates (${randomCoordinates.x},${randomCoordinates.y})`);
   // Wywołaj standardową logikę ataku z wylosowanymi koordynatami
-  return handleAttack(gameId, attackingPlayerId, randomCoordinates);
+  const result = handleAttack(gameId, attackingPlayerId, randomCoordinates);
+  // handleAttack już loguje swój separator, więc tutaj nie musimy dodawać kolejnego, chyba że chcemy odróżnić koniec randomAttack od końca samego ataku.
+  return result;
 }
 
 export function getGameById(gameId: number): Game | undefined {
