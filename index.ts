@@ -1,36 +1,43 @@
 import { httpServer } from "./src/http_server/index.js"; // Upewnij się, że ścieżka jest poprawna
 import { createWebSocketServer } from "./src/websocket/index.js"; // Upewnij się, że ścieżka jest poprawna
-import type { WebSocketServer as WebSocketServerType, WebSocket } from 'ws'; // Import typów dla WebSocket
+import * as WS_NAMESPACE from 'ws'; // Importuj wszystko jako WS_NAMESPACE
 import dotenv from 'dotenv';
 
 // Załaduj zmienne środowiskowe z pliku .env
 dotenv.config();
-const HTTP_PORT = process.env.HTTP_PORT || 8181;
+const FRONTEND_PORT = +(process.env.FRONTEND_PORT || 8181); // Konwertuj na liczbę
+const WEBSOCKET_PORT = +(process.env.WEBSOCKET_PORT || 3000); // Konwertuj na liczbę
 
-console.log(`Attempting to start HTTP server on port ${HTTP_PORT}...`);
+console.log(`Attempting to start HTTP server for frontend on port ${FRONTEND_PORT}...`);
 
-let wssInstance: WebSocketServerType | null = null;
+let wssInstance: WS_NAMESPACE.WebSocketServer | null = null; // Użyjemy typu WebSocketServer z domyślnego eksportu
 
 httpServer.on('error', (error: NodeJS.ErrnoException) => {
   console.error('HTTP Server Error:', error);
   if (error.code === 'EADDRINUSE') {
-    console.error(`Error: Port ${HTTP_PORT} is already in use. Please close the other application or choose a different port.`);
+    console.error(`Error: Port ${FRONTEND_PORT} for frontend is already in use. Please close the other application or choose a different port.`);
   }
   process.exit(1); // Zakończ, jeśli serwer HTTP nie może wystartować
 });
 
-httpServer.listen(HTTP_PORT, async () => {
-  console.log(`HTTP server is listening on port ${HTTP_PORT}`);
+httpServer.listen(FRONTEND_PORT, async () => {
+  console.log(`HTTP server for frontend is listening on port ${FRONTEND_PORT}`);
+  // Serwer WebSocket startuje niezależnie
+});
+
+// Inicjalizacja serwera WebSocket na osobnym porcie
+async function startWebSocketServer() {
   try {
     console.log('Initializing WebSocket server...');
-    // createWebSocketServer jest teraz async, więc używamy await
-    wssInstance = await createWebSocketServer(httpServer);
+    wssInstance = await createWebSocketServer(WEBSOCKET_PORT); // Przekazujemy port zamiast serwera HTTP
     console.log(`WebSocket server instance created: ${wssInstance ? 'yes' : 'no'}`);
   } catch (err) {
     console.error('Failed to initialize WebSocket server:', err);
     process.exit(1);
   }
-});
+}
+
+startWebSocketServer();
 
 function gracefulShutdown(signal: string) {
   console.log(`\nReceived ${signal}. Shutting down gracefully...`);
@@ -39,8 +46,9 @@ function gracefulShutdown(signal: string) {
     console.log('HTTP server closed.');
     if (wssInstance) {
       console.log('Closing WebSocket connections...');
-      wssInstance.clients.forEach((client: WebSocket) => { // Dodano typ dla client
-        if (client.readyState === client.OPEN) { // Użyj client.OPEN zamiast WebSocket.OPEN dla instancji klienta
+      wssInstance.clients.forEach((client: WS_NAMESPACE.default) => { // Użyj typu WS_NAMESPACE.default
+        // Poprawka: Użyj WebSocket.OPEN do sprawdzania stanu połączenia
+        if (client.readyState === WS_NAMESPACE.default.OPEN) { 
           client.close();
         }
       });

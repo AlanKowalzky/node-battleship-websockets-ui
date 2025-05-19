@@ -14,6 +14,21 @@ export interface Room {
   status: 'waiting' | 'ready' | 'playing' | 'finished'; // waiting: 1 gracz, ready: 2 graczy, playing: gra trwa
   gameId?: number; // ID gry, gdy gra się rozpocznie
 }
+
+// Definicje typów dla danych wysyłanych do klienta
+export interface ClientRoomUser {
+  name: string;
+  index: number;
+  gameId?: number;
+  gamePlayerId?: number;
+}
+
+export interface ClientRoom {
+  id: number;
+  users: ClientRoomUser[];
+  status: 'waiting' | 'ready' | 'playing' | 'finished';
+  gameId?: number;
+}
 // Map przechowująca aktywne pokoje
 const rooms = new Map<number, Room>();
 let nextRoomId = 1;
@@ -85,9 +100,20 @@ export function addUserToRoom(roomId: number, userId: number, userName: string, 
   return { room };
 }
 
-export function getAvailableRooms(): Room[] {
+export function getAvailableRooms(): ClientRoom[] {
   // Zwróć tylko pokoje ze statusem 'waiting' (1 gracz)
-  return Array.from(rooms.values()).filter(room => room.status === 'waiting');
+  const availableRooms = Array.from(rooms.values()).filter(room => room.status === 'waiting');
+  return availableRooms.map(room => ({
+    id: room.id,
+    users: room.users.map(user => ({ // Mapuj RoomUser do ClientRoomUser, omijając 'ws'
+      name: user.name,
+      index: user.index,
+      gameId: user.gameId,
+      gamePlayerId: user.gamePlayerId,
+    })),
+    status: room.status,
+    gameId: room.gameId,
+  }));
 }
 
 export function getRoomById(roomId: number): Room | undefined {

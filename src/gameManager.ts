@@ -111,6 +111,40 @@ function isShipKilled(ship: Ship, shotsReceived: Shot[]): boolean {
   return hitCount === ship.length;
 }
 
+function markSurroundingCellsAsMiss(
+  board: PlayerBoard,
+  ship: Ship
+): void {
+  const boardSize = 10; // Załóżmy rozmiar planszy 10x10
+  for (let i = 0; i < ship.length; i++) {
+    // Kierunek statku: true dla poziomego, false dla pionowego w oryginalnym kodzie.
+    // W mojej implementacji: direction: true dla pionowego, false dla poziomego.
+    // Dostosujmy do oryginalnej logiki, gdzie direction: true to poziomy.
+    const shipX = ship.position.x + (ship.direction ? i : 0); 
+    const shipY = ship.position.y + (ship.direction ? 0 : i); 
+
+    // Sprawdź 8 sąsiadów + samą komórkę (choć sama komórka już jest trafiona)
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const checkX = shipX + dx;
+        const checkY = shipY + dy;
+
+        // Sprawdź granice planszy
+        if (checkX >= 0 && checkX < boardSize && checkY >= 0 && checkY < boardSize) {
+          // Sprawdź, czy pole nie było już strzelane
+          const alreadyShot = board.shotsReceived.some(
+            (s) => s.x === checkX && s.y === checkY
+          );
+          if (!alreadyShot) {
+            board.shotsReceived.push({ x: checkX, y: checkY, result: 'miss' });
+            console.log(`[GameManager] Marked surrounding cell (${checkX},${checkY}) as miss for ship type ${ship.type}`);
+          }
+        }
+      }
+    }
+  }
+}
+
 function checkWinCondition(defendingPlayerBoard: PlayerBoard): boolean {
   if (!defendingPlayerBoard || !defendingPlayerBoard.ships || !defendingPlayerBoard.shotsReceived) return false;
   return defendingPlayerBoard.ships.every(ship => isShipKilled(ship, defendingPlayerBoard.shotsReceived));
@@ -180,6 +214,8 @@ export function handleAttack(
         }
       }
       console.log(`[GameManager] Ship killed: ${hitShip.type} in game ${gameId}`);
+      // Oznacz komórki wokół zatopionego statku jako 'miss' na planszy broniącego się
+      markSurroundingCellsAsMiss(defendingPlayer.board, hitShip);
     }
   } else {
     attackResult = 'miss';
@@ -203,6 +239,45 @@ export function handleAttack(
 
   console.log(`[GameManager] Attack in game ${gameId} by ${attackingPlayerId} at (${coordinates.x},${coordinates.y}): ${attackResult}. Turn changed: ${turnChanged}. Next player: ${nextPlayerId}`);
   return { gameId, attackingPlayerId, coordinates, result: attackResult, shipKilled, turnChanged, nextPlayerId, winner };
+}
+
+export function handleRandomAttack(
+  gameId: number,
+  attackingPlayerId: number
+): AttackResultDetails {
+  const game = activeGames.get(gameId);
+  if (!game) return { error: 'Game not found' } as AttackResultDetails;
+  // Podstawowe walidacje (tura, status gry) są w handleAttack, ale możemy je powtórzyć lub uprościć
+  if (game.status !== 'playing') return { error: 'Game is not active' } as AttackResultDetails;
+  const attackingPlayerIndex = game.players.findIndex(p => p.playerId === attackingPlayerId);
+  if (attackingPlayerIndex === -1) return { error: 'Attacking player not found' } as AttackResultDetails;
+  if (game.currentPlayerIndex !== attackingPlayerIndex) return { error: 'Not your turn' } as AttackResultDetails;
+
+  const defendingPlayerIndex = 1 - attackingPlayerIndex;
+  const defendingPlayerBoard = game.players[defendingPlayerIndex].board;
+
+  if (!defendingPlayerBoard) return { error: 'Defending player board not set up' } as AttackResultDetails;
+
+  const availableCoordinates: { x: number; y: number }[] = [];
+  for (let x = 0; x < 10; x++) { // Zakładamy planszę 10x10
+    for (let y = 0; y < 10; y++) {
+      if (!defendingPlayerBoard.shotsReceived.some(shot => shot.x === x && shot.y === y)) {
+        availableCoordinates.push({ x, y });
+      }
+    }
+  }
+
+  if (availableCoordinates.length === 0) {
+    // Wszystkie pola zostały ostrzelane - to nie powinno się zdarzyć przed końcem gry
+    return { error: 'No available cells to shoot at (all cells shot)' } as AttackResultDetails;
+  }
+
+  const randomIndex = Math.floor(Math.random() * availableCoordinates.length);
+  const randomCoordinates = availableCoordinates[randomIndex];
+
+  console.log(`[GameManager] Random attack for player ${attackingPlayerId} in game ${gameId} chose coordinates (${randomCoordinates.x},${randomCoordinates.y})`);
+  // Wywołaj standardową logikę ataku z wylosowanymi koordynatami
+  return handleAttack(gameId, attackingPlayerId, randomCoordinates);
 }
 
 export function getGameById(gameId: number): Game | undefined {

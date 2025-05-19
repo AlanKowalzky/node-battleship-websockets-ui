@@ -20,6 +20,8 @@ export function handleWebSocketMessage(
   let responseData: any;
   let responseType = type;
   let shouldSendUpdateWinners = false;
+  // Zmienna do przechowywania wyników ataku, aby była dostępna poza switchem
+  let attackResultDetailsFromSwitch: gameManager.AttackResultDetails | undefined = undefined;
   let shouldSendUpdateRoom = false;
 
   console.log(
@@ -113,71 +115,89 @@ export function handleWebSocketMessage(
         break;
       }
 
-      case 'attack':
-      case 'randomAttack': { // For now, randomAttack is handled like attack, client sends coords
+      case 'attack': {
         if (client.playerId === undefined) {
           responseData = { error: true, errorText: 'Player not registered/logged in' };
-          responseType = type; // 'attack' or 'randomAttack'
+          responseType = 'attack';
           break;
         }
         if (!data) {
-          throw new Error(`Data for "${type}" command is missing.`);
+          throw new Error(`Data for "attack" command is missing.`);
         }
         const { gameId, x, y, indexPlayer } = JSON.parse(data) as AttackData;
 
         if (client.playerId !== indexPlayer) {
           responseData = { error: true, errorText: 'Player ID mismatch for attack command' };
-          responseType = type;
+          responseType = 'attack';
           break;
         }
 
         const game = gameManager.getGameById(gameId);
         if (!game) {
           responseData = { error: true, errorText: 'Game not found' };
-          responseType = type;
+          responseType = 'attack';
           break;
         }
-
-        // Ensure both players are still connected (basic check)
         const player1 = game.players[0];
         const player2 = game.players[1];
         if (!player1.ws || !player2.ws) {
             console.warn(`[MessageHandler] Attack in game ${gameId} aborted, one player disconnected.`);
-            // Optionally, handle game termination here
             responseData = { error: true, errorText: 'Opponent disconnected' };
-            responseType = type;
-            // Consider ending the game if a player is missing
+            responseType = 'attack';
+            break;
+        }
+        attackResultDetailsFromSwitch = gameManager.handleAttack(gameId, client.playerId, { x, y });
+        if (attackResultDetailsFromSwitch.error) {
+          responseData = { error: true, errorText: attackResultDetailsFromSwitch.error };
+          responseType = 'attack';
+        } else {
+          // Wiadomość 'attack' z wynikiem strzału zostanie wysłana poniżej, jeśli nie ma błędu
+          // i zostanie obsłużona poniżej, poza blokiem switch, jeśli nie ma błędu.
+          // Tutaj tylko przygotowujemy dane, jeśli atak był udany.
+        }
+        break;
+      }
+      case 'randomAttack': {
+        if (client.playerId === undefined) {
+          responseData = { error: true, errorText: 'Player not registered/logged in' };
+          responseType = 'randomAttack';
+          break;
+        }
+        // Dla randomAttack, 'data' może nie być potrzebne lub może zawierać tylko gameId i indexPlayer
+        // Załóżmy, że klient wysyła {"gameId": X, "indexPlayer": Y}
+        if (!data) {
+            throw new Error('Data for "randomAttack" command is missing (expected gameId, indexPlayer).');
+        }
+        const { gameId, indexPlayer } = JSON.parse(data) as Omit<AttackData, 'x' | 'y'>; // Omit x, y
+
+        if (client.playerId !== indexPlayer) {
+          responseData = { error: true, errorText: 'Player ID mismatch for randomAttack command' };
+          responseType = 'randomAttack';
+          break;
+        }
+        
+        const game = gameManager.getGameById(gameId);
+        if (!game) {
+          responseData = { error: true, errorText: 'Game not found for randomAttack' };
+          responseType = 'randomAttack';
+          break;
+        }
+        const player1 = game.players[0];
+        const player2 = game.players[1];
+        if (!player1.ws || !player2.ws) {
+            console.warn(`[MessageHandler] RandomAttack in game ${gameId} aborted, one player disconnected.`);
+            responseData = { error: true, errorText: 'Opponent disconnected' };
+            responseType = 'randomAttack';
             break;
         }
 
-        const attackResultDetails = gameManager.handleAttack(gameId, client.playerId, { x, y });
-
-        if (attackResultDetails.error) {
-          responseData = { error: true, errorText: attackResultDetails.error };
-          responseType = type;
+        attackResultDetailsFromSwitch = gameManager.handleRandomAttack(gameId, client.playerId);
+        if (attackResultDetailsFromSwitch.error) {
+          responseData = { error: true, errorText: attackResultDetailsFromSwitch.error };
+          responseType = 'randomAttack';
         } else {
-          // No direct response to the attacker for 'attack' command itself.
-          // Updates will be sent via broadcasted 'attack', 'turn', 'finish'.
-          const attackMessagePayload: any = {
-            position: { x: attackResultDetails.coordinates.x, y: attackResultDetails.coordinates.y },
-            currentPlayer: attackResultDetails.attackingPlayerId, // The player who made the shot
-            status: attackResultDetails.result,
-          };
-          if (attackResultDetails.shipKilled) {
-            attackMessagePayload.ship = attackResultDetails.shipKilled;
-          }
-
-          // Send 'attack' update to both players
-          game.players.forEach(p => {
-            if (p.ws) sendMessageToClient(p.ws, 'attack', attackMessagePayload);
-          });
-          console.log(`[MessageHandler] Broadcasted 'attack' for game ${gameId}: ${JSON.stringify(attackMessagePayload)}`);
-
-          // Subsequent 'turn' or 'finish' messages will be handled after the switch
+           // Wiadomość 'attack' z wynikiem strzału zostanie wysłana poniżej, jeśli nie ma błędu
         }
-        // Important: Do not set responseData here if successful,
-        // as the flow continues to send turn/finish messages.
-        // Only set responseData for direct errors to the attacking client.
         break;
       }
 
@@ -239,31 +259,51 @@ export function handleWebSocketMessage(
     }
 
     // Handle turn and finish messages after attack or randomAttack
+    // Ten blok jest teraz kluczowy dla wysyłania aktualizacji po udanym ataku (zwykłym lub losowym)
     if ((type === 'attack' || type === 'randomAttack') && !responseData?.error) {
-      if (!data) return; // Should have been caught earlier
-      const { gameId } = JSON.parse(data) as AttackData; // or RandomAttackData
-      const game = gameManager.getGameById(gameId); // Get the potentially updated game state
+      // Użyj attackResultDetailsFromSwitch, które zostało ustawione w bloku switch
+      if (attackResultDetailsFromSwitch && !attackResultDetailsFromSwitch.error) {
+        const game = gameManager.getGameById(attackResultDetailsFromSwitch.gameId);
+        if (!game) {
+          // To nie powinno się zdarzyć, jeśli attackResultDetailsFromSwitch jest poprawne
+          console.error(`[MessageHandler] Game not found for ID ${attackResultDetailsFromSwitch.gameId} after successful attack.`);
+          return;
+        }
 
-      if (game) {
+        // Wyślij wiadomość 'attack' z wynikiem do obu graczy
+        const attackMessagePayload: any = {
+          position: { x: attackResultDetailsFromSwitch.coordinates.x, y: attackResultDetailsFromSwitch.coordinates.y },
+          currentPlayer: attackResultDetailsFromSwitch.attackingPlayerId,
+          status: attackResultDetailsFromSwitch.result,
+        };
+        if (attackResultDetailsFromSwitch.shipKilled) {
+          attackMessagePayload.ship = attackResultDetailsFromSwitch.shipKilled;
+        }
+        game.players.forEach((p: typeof game.players[0]) => { // Dodano typ dla p
+          if (p.ws) sendMessageToClient(p.ws, 'attack', attackMessagePayload);
+        });
+        console.log(`[MessageHandler] Broadcasted 'attack' for game ${attackResultDetailsFromSwitch.gameId}: ${JSON.stringify(attackMessagePayload)}`);
+
+        // Logika 'finish' lub 'turn'
         if (game.status === 'finished' && game.winner !== undefined) {
           const winnerId = game.winner;
           const finishPayload = { winPlayer: winnerId };
-          game.players.forEach(p => {
+          game.players.forEach((p: typeof game.players[0]) => { // Dodano typ dla p
             if (p.ws) sendMessageToClient(p.ws, 'finish', finishPayload);
           });
-          console.log(`[MessageHandler] Broadcasted 'finish' for game ${gameId}: ${JSON.stringify(finishPayload)}`);
+          console.log(`[MessageHandler] Broadcasted 'finish' for game ${game.gameId}: ${JSON.stringify(finishPayload)}`);
           
-          playerStore.addWinner(winnerId); // Update winners list
-          shouldSendUpdateWinners = true;  // Trigger broadcast
-          gameManager.removeGame(gameId);  // Clean up game
+          playerStore.incrementWins(winnerId);
+          shouldSendUpdateWinners = true;
+          gameManager.removeGame(game.gameId);
         } else if (game.status === 'playing') {
           const turnPayload = { currentPlayer: game.players[game.currentPlayerIndex].playerId };
-          game.players.forEach(p => {
+          game.players.forEach((p: typeof game.players[0]) => { // Dodano typ dla p
             if (p.ws) sendMessageToClient(p.ws, 'turn', turnPayload);
           });
-          console.log(`[MessageHandler] Broadcasted 'turn' for game ${gameId}: ${JSON.stringify(turnPayload)}`);
+          console.log(`[MessageHandler] Broadcasted 'turn' for game ${game.gameId}: ${JSON.stringify(turnPayload)}`);
         }
-      }
+      } // koniec if (attackResultDetailsFromSwitch && !attackResultDetailsFromSwitch.error)
     }
 
 
@@ -278,8 +318,6 @@ export function handleWebSocketMessage(
 
   } catch (error) {
     console.error(`[MessageHandler] Error processing message type ${type}:`, error);
-    // W przypadku błędu parsowania lub innego, wyślij odpowiedź błędu dla oryginalnego typu komendy, jeśli to możliwe
-    // lub ogólny błąd.
     const errorText = error instanceof Error ? error.message : 'Unknown error processing request';
     sendMessageToClient(client, type, { error: true, errorText }, id);
   }
