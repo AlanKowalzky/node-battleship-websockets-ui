@@ -9,6 +9,7 @@ export interface Ship {
   direction: boolean; // true for horizontal, false for vertical
   length: number;
   type: 'small' | 'medium' | 'large' | 'huge';
+  hits: boolean[]; // Tablica trafień dla każdego segmentu
 }
 
 export interface Shot {
@@ -87,7 +88,7 @@ export function addShipsToGame(gameId: number, playerId: number, ships: Ship[]):
     return { error: 'Player has already submitted ships for this game' };
   }
 
-  game.players[playerIndex].board = { ships, shotsReceived: [] }; // Initialize shotsReceived
+  game.players[playerIndex].board = { ships: ships.map(s => ({ ...s, hits: Array(s.length).fill(false) })), shotsReceived: [] };
   console.log(`[GameManager] Ships added for player ${game.players[playerIndex].playerName} (ID: ${playerId}) in game ${gameId}`);
 
   // Sprawdź, czy obaj gracze dodali statki
@@ -99,19 +100,48 @@ export function addShipsToGame(gameId: number, playerId: number, ships: Ship[]):
   return { game };
 }
 
-function getShipAtCoordinates(coordinates: { x: number; y: number }, ships: Ship[]): Ship | undefined {
+// Helper function to format ships on a board for logging
+function formatShipsForLog(ships: Ship[], boardSize = 10): string {
+  const board: string[][] = Array(boardSize)
+    .fill(null)
+    .map(() => Array(boardSize).fill('.'));
+
+  ships.forEach(ship => {
+    for (let i = 0; i < ship.length; i++) {
+      const x = ship.position.x + (ship.direction ? i : 0);
+      const y = ship.position.y + (ship.direction ? 0 : i);
+      if (x >= 0 && x < boardSize && y >= 0 && y < boardSize) {
+        board[y][x] = 'X'; // Mark ship segment
+      }
+    }
+  });
+
+  let logString = '\nBoard Visualization:\n  ';
+  for (let i = 0; i < boardSize; i++) {
+    logString += `${i} `;
+  }
+  logString += '\n';
+  board.forEach((row, rowIndex) => {
+    logString += `${rowIndex} ${row.join(' ')}\n`;
+  });
+  return logString;
+}
+
+function getShipAtCoordinates(coordinates: { x: number; y: number }, ships: Ship[]): { ship: Ship, segmentIndex: number } | undefined {
   console.log(`[getShipAtCoordinates] Checking for ship at Target Coords: (${coordinates.x}, ${coordinates.y})`);
   // console.log(`[getShipAtCoordinates] Full ships array being checked: ${JSON.stringify(ships, null, 2)}`); // Można odkomentować dla pełnego obrazu
 
   for (const ship of ships) {
     console.log(`[getShipAtCoordinates] Iterating ship: type=${ship.type}, len=${ship.length}, pos=(${ship.position.x},${ship.position.y}), dir=${ship.direction}`);
     for (let i = 0; i < ship.length; i++) {
+      if (ship.hits[i]) continue; // Jeśli segment już trafiony, nie można go trafić ponownie (opcjonalna optymalizacja)
+
       const shipX = ship.position.x + (ship.direction ? i : 0);
       const shipY = ship.position.y + (ship.direction ? 0 : i);
       // console.log(`[getShipAtCoordinates]   Ship segment ${i}: (${shipX}, ${shipY})`); // Mniej gadatliwe, odkomentuj w razie potrzeby
       if (shipX === coordinates.x && shipY === coordinates.y) {
         console.log(`[getShipAtCoordinates]   >>> HIT on ship type ${ship.type} at segment ${i} (${shipX},${shipY})! Target Coords: (${coordinates.x},${coordinates.y})`);
-        return ship; // Znaleziono statek
+        return { ship, segmentIndex: i }; // Zwróć statek i indeks trafionego segmentu
       }
     }
   }
@@ -119,16 +149,9 @@ function getShipAtCoordinates(coordinates: { x: number; y: number }, ships: Ship
   return undefined;
 }
 
-function isShipKilled(ship: Ship, shotsReceived: Shot[]): boolean {
-  let hitCount = 0;
-  for (let i = 0; i < ship.length; i++) {
-    const shipX = ship.position.x + (ship.direction ? i : 0);
-    const shipY = ship.position.y + (ship.direction ? 0 : i);
-    if (shotsReceived.some(shot => shot.x === shipX && shot.y === shipY && (shot.result === 'shot' || shot.result === 'killed'))) {
-      hitCount++;
-    }
-  }
-  return hitCount === ship.length;
+function isShipKilled(ship: Ship): boolean {
+  // Teraz sprawdzamy bezpośrednio tablicę hits
+  return ship.hits.every(hit => hit === true);
 }
 
 function markSurroundingCellsAsMiss(
@@ -203,7 +226,8 @@ export function handleAttack(
 
   const defendingPlayerIndex = 1 - attackingPlayerIndex;
   const defendingPlayer = game.players[defendingPlayerIndex];
-  console.log(`[handleAttack] DefendingPlayerID: ${defendingPlayer.playerId}. Ships on their board BEFORE check: ${JSON.stringify(defendingPlayer.board.ships, null, 2)}`);
+  console.log(`[handleAttack] DefendingPlayerID: ${defendingPlayer.playerId}. Ships on their board BEFORE check (raw): ${JSON.stringify(defendingPlayer.board.ships, null, 2)}`);
+  console.log(formatShipsForLog(defendingPlayer.board.ships));
 
   if (!defendingPlayer.board) return { error: 'Defending player board not set up' } as AttackResultDetails;
 
@@ -215,10 +239,12 @@ export function handleAttack(
   let shipKilled: Ship | undefined = undefined;
   let turnChanged = true;
 
-  const hitShip = getShipAtCoordinates(coordinates, defendingPlayer.board.ships);
-  console.log(`[handleAttack] Result from getShipAtCoordinates: ${hitShip ? `HIT on ship type ${hitShip.type}` : 'MISS (returned undefined)'}`);
+  const hitResult = getShipAtCoordinates(coordinates, defendingPlayer.board.ships);
+  console.log(`[handleAttack] Result from getShipAtCoordinates: ${hitResult ? `HIT on ship type ${hitResult.ship.type} at segment ${hitResult.segmentIndex}` : 'MISS (returned undefined)'}`);
 
-  if (hitShip) {
+  if (hitResult) {
+    const { ship: hitShip, segmentIndex } = hitResult;
+
     attackResult = 'shot';
     turnChanged = false; // Player continues turn on hit
     console.log(`[handleAttack] HIT confirmed by handleAttack. turnChanged is now: ${turnChanged}. Player ${attackingPlayerId} continues turn.`);
@@ -226,8 +252,9 @@ export function handleAttack(
 
     // Record the shot
     defendingPlayer.board.shotsReceived.push({ x: coordinates.x, y: coordinates.y, result: 'shot' });
+    hitShip.hits[segmentIndex] = true; // Zaktualizuj tablicę trafień statku
 
-    if (isShipKilled(hitShip, defendingPlayer.board.shotsReceived)) {
+    if (isShipKilled(hitShip)) {
       attackResult = 'killed';
       shipKilled = hitShip;
       // Update all shots for this ship to 'killed' status
