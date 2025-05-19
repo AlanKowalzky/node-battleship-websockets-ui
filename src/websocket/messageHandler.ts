@@ -1,16 +1,18 @@
-import WebSocket from 'ws';
-import * as playerStore from '../playerStore';
-import * as roomManager from '../roomManager'; // Dodajemy roomManager
-import { ClientMessage } from '../types/websocket';
-import { sendMessageToClient, sendUpdateWinners, sendUpdateRoom } from './index'; // Dodajemy sendUpdateRoom
+import WebSocket, { WebSocketServer } from 'ws'; // Zaimportuj WebSocketServer
+import * as playerStore from '../playerStore.js';
+import * as roomManager from '../roomManager.js'; // Dodajemy roomManager
+import * as gameManager from '../gameManager.js'; // Dodajemy gameManager
+import { ClientMessage } from '../types/websocket.js';
+import { sendMessageToClient, sendUpdateWinners, sendUpdateRoom } from './index.js'; // Dodajemy sendUpdateRoom
 
 // Definicja typów dla danych oczekiwanych przez różne komendy
 interface RegData { name: string; password: string; }
 interface AddUserToRoomData { indexRoom: number; }
+interface AddShipsData { gameId: number; ships: gameManager.Ship[]; indexPlayer: number; } // gameManager.Ship jest już poprawne
 export function handleWebSocketMessage(
   client: WebSocket,
   parsedMessage: ClientMessage,
-  wss: WebSocket.Server
+  wss: WebSocketServer // Poprawny typ dla instancji serwera WebSocket
 ): void {
   const { type, data, id } = parsedMessage;
   let responseData: any;
@@ -85,6 +87,30 @@ export function handleWebSocketMessage(
         break;
       }
 
+      case 'add_ships': {
+        if (client.playerId === undefined) {
+          responseData = { error: true, errorText: 'Player not registered/logged in' };
+          responseType = 'add_ships';
+        } else {
+          if (!data) {
+            throw new Error('Data for "add_ships" command is missing.');
+          }
+          const { gameId, ships, indexPlayer } = JSON.parse(data) as AddShipsData;
+          // Upewnij się, że gracz wysyłający statki to ten sam gracz (indexPlayer)
+          if (client.playerId !== indexPlayer) {
+            responseData = { error: true, errorText: 'Player ID mismatch' };
+            responseType = 'add_ships';
+          } else {
+            const result = gameManager.addShipsToGame(gameId, client.playerId, ships);
+            if (result.error) {
+              responseData = { error: true, errorText: result.error };
+              responseType = 'add_ships';
+            } // Jeśli sukces, odpowiedź zostanie wysłana w bloku 'start_game' poniżej
+          }
+        }
+        break;
+      }
+
       default:
         responseData = { message: `Received and processed command: ${type}` };
         console.log(`[MessageHandler] Unknown command type: ${type}`);
@@ -102,8 +128,10 @@ export function handleWebSocketMessage(
         const { indexRoom } = JSON.parse(data) as AddUserToRoomData;
         const room = roomManager.getRoomById(indexRoom);
         if (room && room.status === 'ready' && room.users.length === 2 && room.gameId !== undefined) {
-            console.log(`[MessageHandler] Room ${room.id} is full. Starting game ${room.gameId}.`);
-            room.users.forEach(userInRoom => {
+            console.log(`[MessageHandler] Room ${room.id} is full. Initializing game ${room.gameId}.`);
+            // Utwórz grę w gameManager
+            gameManager.createNewGame(room.gameId, room.users[0], room.users[1]);
+            room.users.forEach((userInRoom: roomManager.RoomUser) => { // Dodano typ dla userInRoom
                 if (userInRoom.ws && userInRoom.gamePlayerId !== undefined) {
                     sendMessageToClient(userInRoom.ws, 'create_game', {
                         idGame: room.gameId,
@@ -115,6 +143,29 @@ export function handleWebSocketMessage(
             roomManager.removeRoom(room.id); // Usuń pokój z listy dostępnych
             shouldSendUpdateRoom = true; // Upewnij się, że update_room zostanie wysłany
         }
+    }
+
+    // Sprawdź, czy gra może się rozpocząć po dodaniu statków
+    if (type === 'add_ships' && responseType !== 'error' && responseData?.error !== true) {
+      if (!data) return;
+      const { gameId } = JSON.parse(data) as AddShipsData;
+      const game = gameManager.getGameById(gameId);
+      if (game && game.status === 'playing') {
+        console.log(`[MessageHandler] Game ${game.gameId} is ready to start. Sending start_game and turn messages.`);
+        game.players.forEach((player: typeof game.players[0], playerGameIndex: number) => { // Dodano typy
+          if (player.ws && player.board) { // Upewnij się, że board istnieje
+            sendMessageToClient(player.ws, 'start_game', {
+              ships: player.board.ships, // Pozycje własnych statków
+              currentPlayerIndex: game.currentPlayerIndex === playerGameIndex ? player.playerId : game.players[game.currentPlayerIndex].playerId, // ID gracza, który zaczyna
+            });
+            sendMessageToClient(player.ws, 'turn', {
+              currentPlayer: game.players[game.currentPlayerIndex].playerId,
+            });
+            console.log(`[MessageHandler] Sent start_game and turn to player ${player.playerName} (ID: ${player.playerId})`);
+          }
+        });
+        // Gra się rozpoczęła, nie ma potrzeby wysyłać update_room, bo pokój już został usunięty
+      }
     }
 
     if (shouldSendUpdateWinners) {

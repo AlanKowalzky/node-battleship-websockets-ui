@@ -1,6 +1,8 @@
+import WebSocket from 'ws'; // Importujemy WebSocket z biblioteki 'ws'
+
 export interface RoomUser {
   name: string;
-  index: number; // Globalny ID gracza z playerStore
+  index: number; // Globalny ID gracza z playerStore (playerId)
   ws?: WebSocket; // Referencja do połączenia WebSocket (opcjonalne, ale przydatne)
   gameId?: number; // ID gry, gdy gra się rozpocznie
   gamePlayerId?: number; // ID gracza w ramach danej gry (1 lub 2)
@@ -12,7 +14,7 @@ export interface Room {
   status: 'waiting' | 'ready' | 'playing' | 'finished'; // waiting: 1 gracz, ready: 2 graczy, playing: gra trwa
   gameId?: number; // ID gry, gdy gra się rozpocznie
 }
-
+// Map przechowująca aktywne pokoje
 const rooms = new Map<number, Room>();
 let nextRoomId = 1;
 let nextGameId = 1; // Licznik dla ID gier
@@ -20,6 +22,10 @@ let nextGameId = 1; // Licznik dla ID gier
 export function createRoom(creatorPlayerId: number, creatorPlayerName: string, creatorWs: WebSocket): Room {
   const newRoomId = nextRoomId++;
   const creator: RoomUser = {
+    // Upewnij się, że playerId jest poprawnie przekazywane i używane
+    // Zgodnie z logiką w messageHandler, creatorPlayerId to client.playerId
+    // a creatorPlayerName to client.playerName
+    // index w RoomUser to globalne ID gracza
     name: creatorPlayerName,
     index: creatorPlayerId,
     ws: creatorWs,
@@ -36,7 +42,7 @@ export function createRoom(creatorPlayerId: number, creatorPlayerName: string, c
   return newRoom;
 }
 
-export function addUserToRoom(roomId: number, userId: number, userName: string, userWs: WebSocket): { room?: Room; error?: string } {
+export function addUserToRoom(roomId: number, userId: number, userName: string, userWs: WebSocket): { room?: Room; error?: string; } {
   const room = rooms.get(roomId);
 
   if (!room) {
@@ -53,6 +59,9 @@ export function addUserToRoom(roomId: number, userId: number, userName: string, 
   }
 
   const newUser: RoomUser = {
+    // Upewnij się, że userId jest poprawnie przekazywane i używane
+    // Zgodnie z logiką w messageHandler, userId to client.playerId
+    // a userName to client.playerName
     name: userName,
     index: userId,
     ws: userWs,
@@ -64,11 +73,13 @@ export function addUserToRoom(roomId: number, userId: number, userName: string, 
   console.log(`[RoomManager] Added player ${userName} (ID: ${userId}) to room ${roomId}`);
 
   // Przypisz ID gry i ID graczy w grze
+  // Ta logika powinna być wywołana tylko raz, gdy pokój staje się 'ready'
   const gameId = nextGameId++;
   room.gameId = gameId;
   room.users[0].gameId = gameId;
   room.users[0].gamePlayerId = 1; // Gracz 1 w tej grze
   room.users[1].gameId = gameId;
+  // Upewnij się, że drugi gracz ma gamePlayerId = 2
   room.users[1].gamePlayerId = 2; // Gracz 2 w tej grze
 
   return { room };
