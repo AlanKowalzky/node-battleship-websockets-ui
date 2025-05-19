@@ -17,9 +17,6 @@
     "allowJs": true, // Pozwala na kompilację plików JavaScript (przydatne przy migracji)
     "typeRoots": ["./node_modules/@types", "./src/types"] // Dodaj ścieżkę do własnych typów
   },
-  "include": [
-    "index.ts",
-    "src/**/*.ts"
-  ],
+  "include": ["index.ts", "src/**/*.ts"],
   "exclude": ["node_modules", "dist", "front"]
 }

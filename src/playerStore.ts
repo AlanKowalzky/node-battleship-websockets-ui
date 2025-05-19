@@ -9,7 +9,10 @@ const playersById = new Map<number, Player>();
 const playersByName = new Map<string, Player>();
 let nextPlayerId = 1;
 
-export function registerOrLoginPlayer(name: string, password: string): { player?: Player; error?: string; isNewPlayer?: boolean } {
+export function registerOrLoginPlayer(
+  name: string,
+  password: string
+): { player?: Player; error?: string; isNewPlayer?: boolean } {
   const existingPlayer = playersByName.get(name);
 
   if (existingPlayer) {
@@ -32,7 +35,9 @@ export function registerOrLoginPlayer(name: string, password: string): { player?
     };
     playersById.set(newPlayer.id, newPlayer);
     playersByName.set(newPlayer.name, newPlayer);
-    console.log(`[PlayerStore] Registered new player: ${name} (ID: ${newPlayer.id})`);
+    console.log(
+      `[PlayerStore] Registered new player: ${name} (ID: ${newPlayer.id})`
+    );
     return { player: newPlayer, isNewPlayer: true };
   }
 }
@@ -52,7 +57,9 @@ export function incrementWins(playerId: number): boolean {
   const player = playersById.get(playerId);
   if (player) {
     player.wins += 1;
-    console.log(`[PlayerStore] Incremented wins for player: ${player.name} (ID: ${player.id}). Total wins: ${player.wins}`);
+    console.log(
+      `[PlayerStore] Incremented wins for player: ${player.name} (ID: ${player.id}). Total wins: ${player.wins}`
+    );
     return true;
   }
   return false;

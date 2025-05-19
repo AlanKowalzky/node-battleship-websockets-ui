@@ -3,7 +3,10 @@ import { Ship, PlayerBoard, Shot } from './gameManager.js'; // Importujemy potrz
 const BOARD_SIZE = 10;
 
 // Definiujemy strukturę obiektów w tablicy shipsToPlace, używając typu Ship['type']
-interface ShipInfo { type: Ship['type']; length: number; }
+interface ShipInfo {
+  type: Ship['type'];
+  length: number;
+}
 
 /**
  * Generuje losowe, poprawne rozmieszczenie statków dla bota.
@@ -28,9 +31,11 @@ export function placeBotShips(): Ship[] {
 
   const isPlacementValid = (ship: Ship, existingShips: Ship[]): boolean => {
     // Sprawdź, czy statek mieści się na planszy
-    if (ship.direction) { // Poziomo
+    if (ship.direction) {
+      // Poziomo
       if (ship.position.x + ship.length > BOARD_SIZE) return false;
-    } else { // Pionowo
+    } else {
+      // Pionowo
       if (ship.position.y + ship.length > BOARD_SIZE) return false;
     }
 
@@ -42,8 +47,10 @@ export function placeBotShips(): Ship[] {
           const newShipY = ship.position.y + (ship.direction ? j : i);
 
           for (let ei = 0; ei < existingShip.length; ei++) {
-            const existingShipX = existingShip.position.x + (existingShip.direction ? ei : 0);
-            const existingShipY = existingShip.position.y + (existingShip.direction ? 0 : ei);
+            const existingShipX =
+              existingShip.position.x + (existingShip.direction ? ei : 0);
+            const existingShipY =
+              existingShip.position.y + (existingShip.direction ? 0 : ei);
 
             if (newShipX === existingShipX && newShipY === existingShipY) {
               return false; // Kolizja
@@ -58,12 +65,17 @@ export function placeBotShips(): Ship[] {
   for (const shipInfo of shipsToPlace as ShipInfo[]) {
     let placed = false;
     let attempts = 0;
-    while (!placed && attempts < 1000) { // Ogranicz liczbę prób
+    while (!placed && attempts < 1000) {
+      // Ogranicz liczbę prób
       const newShip: Ship = {
-        position: { x: Math.floor(Math.random() * BOARD_SIZE), y: Math.floor(Math.random() * BOARD_SIZE) },
+        position: {
+          x: Math.floor(Math.random() * BOARD_SIZE),
+          y: Math.floor(Math.random() * BOARD_SIZE),
+        },
         direction: Math.random() < 0.5, // true (poziomo) lub false (pionowo)
         length: shipInfo.length,
         type: shipInfo.type,
+        hits: Array(shipInfo.length).fill(false), // Inicjalizuj tablicę trafień
       };
       if (isPlacementValid(newShip, placedShips)) {
         placedShips.push(newShip);
@@ -72,9 +84,11 @@ export function placeBotShips(): Ship[] {
       attempts++;
     }
     if (!placed) {
-        console.error(`[Bot] Failed to place ship of length ${shipInfo.length} after ${attempts} attempts.`);
-        // W przypadku niepowodzenia, można zresetować i spróbować od nowa,
-        // lub zwrócić błąd. Na razie logujemy.
+      console.error(
+        `[Bot] Failed to place ship of length ${shipInfo.length} after ${attempts} attempts.`
+      );
+      // W przypadku niepowodzenia, można zresetować i spróbować od nowa,
+      // lub zwrócić błąd. Na razie logujemy.
     }
   }
 
@@ -87,12 +101,14 @@ export function placeBotShips(): Ship[] {
  * @param opponentShotsReceived - Tablica strzałów otrzymanych przez przeciwnika (widok bota na planszę przeciwnika).
  * @returns Koordynaty strzału { x, y }.
  */
-export function makeBotShot(opponentShotsReceived: Shot[]): { x: number; y: number } | undefined {
+export function makeBotShot(
+  opponentShotsReceived: Shot[]
+): { x: number; y: number } | undefined {
   const availableCoordinates: { x: number; y: number }[] = [];
   for (let x = 0; x < BOARD_SIZE; x++) {
     for (let y = 0; y < BOARD_SIZE; y++) {
       // Sprawdź, czy pole nie było już strzelane
-      if (!opponentShotsReceived.some(shot => shot.x === x && shot.y === y)) {
+      if (!opponentShotsReceived.some((shot) => shot.x === x && shot.y === y)) {
         availableCoordinates.push({ x, y });
       }
     }
@@ -100,7 +116,7 @@ export function makeBotShot(opponentShotsReceived: Shot[]): { x: number; y: numb
 
   if (availableCoordinates.length === 0) {
     // Wszystkie pola zostały ostrzelane - gra powinna być zakończona
-    console.warn("[Bot] No available cells to shoot at. Game should be over.");
+    console.warn('[Bot] No available cells to shoot at. Game should be over.');
     return undefined; // Brak dostępnych pól
   }
 

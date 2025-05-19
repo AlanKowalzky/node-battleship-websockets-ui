@@ -1,5 +1,5 @@
 // c:\progNodeJS\node-battleship\src\utils.ts
-import { SafeParseResult } from "./types/websocket";
+import { SafeParseResult } from './types/websocket.js';
 
 export function safeJsonParse<T>(jsonString: string): SafeParseResult<T> {
   try {

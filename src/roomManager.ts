@@ -34,7 +34,11 @@ const rooms = new Map<number, Room>();
 let nextRoomId = 1;
 let nextGameId = 1; // Licznik dla ID gier
 
-export function createRoom(creatorPlayerId: number, creatorPlayerName: string, creatorWs: WebSocket): Room {
+export function createRoom(
+  creatorPlayerId: number,
+  creatorPlayerName: string,
+  creatorWs: WebSocket
+): Room {
   const newRoomId = nextRoomId++;
   const creator: RoomUser = {
     // Upewnij się, że playerId jest poprawnie przekazywane i używane
@@ -53,11 +57,18 @@ export function createRoom(creatorPlayerId: number, creatorPlayerName: string, c
   };
 
   rooms.set(newRoomId, newRoom);
-  console.log(`[RoomManager] Created new room: ${newRoomId} by player ${creatorPlayerName} (ID: ${creatorPlayerId})`);
+  console.log(
+    `[RoomManager] Created new room: ${newRoomId} by player ${creatorPlayerName} (ID: ${creatorPlayerId})`
+  );
   return newRoom;
 }
 
-export function addUserToRoom(roomId: number, userId: number, userName: string, userWs: WebSocket): { room?: Room; error?: string; } {
+export function addUserToRoom(
+  roomId: number,
+  userId: number,
+  userName: string,
+  userWs: WebSocket
+): { room?: Room; error?: string } {
   const room = rooms.get(roomId);
 
   if (!room) {
@@ -69,8 +80,8 @@ export function addUserToRoom(roomId: number, userId: number, userName: string, 
   }
 
   // Sprawdź, czy gracz nie jest już w tym pokoju (choć logika frontendu powinna to uniemożliwić)
-  if (room.users.some(user => user.index === userId)) {
-     return { error: 'Player is already in this room' };
+  if (room.users.some((user) => user.index === userId)) {
+    return { error: 'Player is already in this room' };
   }
 
   const newUser: RoomUser = {
@@ -85,7 +96,9 @@ export function addUserToRoom(roomId: number, userId: number, userName: string, 
   room.users.push(newUser);
   room.status = 'ready'; // Pokój gotowy do gry
 
-  console.log(`[RoomManager] Added player ${userName} (ID: ${userId}) to room ${roomId}`);
+  console.log(
+    `[RoomManager] Added player ${userName} (ID: ${userId}) to room ${roomId}`
+  );
 
   // Przypisz ID gry i ID graczy w grze
   // Ta logika powinna być wywołana tylko raz, gdy pokój staje się 'ready'
@@ -100,12 +113,18 @@ export function addUserToRoom(roomId: number, userId: number, userName: string, 
   return { room };
 }
 
-export function getAvailableRooms(): { roomId: number; roomUsers: { name: string; index: number; }[] }[] {
+export function getAvailableRooms(): {
+  roomId: number;
+  roomUsers: { name: string; index: number }[];
+}[] {
   // Zwróć tylko pokoje ze statusem 'waiting' (1 gracz)
-  const availableRooms = Array.from(rooms.values()).filter(room => room.status === 'waiting');
-  return availableRooms.map(room => ({
+  const availableRooms = Array.from(rooms.values()).filter(
+    (room) => room.status === 'waiting'
+  );
+  return availableRooms.map((room) => ({
     roomId: room.id, // Zgodnie ze specyfikacją: roomId
-    roomUsers: room.users.map(user => ({ // Zgodnie ze specyfikacją: roomUsers
+    roomUsers: room.users.map((user) => ({
+      // Zgodnie ze specyfikacją: roomUsers
       name: user.name,
       index: user.index,
       // Usuwamy dodatkowe pola gameId i gamePlayerId, aby ściśle pasować do specyfikacji update_room
@@ -115,20 +134,20 @@ export function getAvailableRooms(): { roomId: number; roomUsers: { name: string
 }
 
 export function getRoomById(roomId: number): Room | undefined {
-    return rooms.get(roomId);
+  return rooms.get(roomId);
 }
 
 export function removeRoom(roomId: number): boolean {
-    const deleted = rooms.delete(roomId);
-    if (deleted) {
-        console.log(`[RoomManager] Removed room: ${roomId}`);
-    }
-    return deleted;
+  const deleted = rooms.delete(roomId);
+  if (deleted) {
+    console.log(`[RoomManager] Removed room: ${roomId}`);
+  }
+  return deleted;
 }
 
 // Funkcja do debugowania (opcjonalna)
 export function getAllRooms(): Room[] {
-    return Array.from(rooms.values());
+  return Array.from(rooms.values());
 }
 
 // Funkcja do resetowania stanu na potrzeby testów (opcjonalna)
@@ -142,4 +161,40 @@ export function resetRoomManager() {
 // Funkcja do pobierania następnego unikalnego ID gry
 export function getNextGameId(): number {
   return nextGameId++;
+}
+
+// Nowa funkcja do znalezienia pokoju po ID gracza
+export function findRoomByPlayerId(playerId: number): Room | undefined {
+  for (const room of rooms.values()) {
+    if (room.users.some((user) => user.index === playerId)) {
+      return room;
+    }
+  }
+  return undefined;
+}
+
+// Nowa funkcja do usunięcia gracza z pokoju
+export function removePlayerFromRoom(
+  roomId: number,
+  playerId: number
+): boolean {
+  const room = rooms.get(roomId);
+  if (room) {
+    const playerIndex = room.users.findIndex((user) => user.index === playerId);
+    if (playerIndex !== -1) {
+      room.users.splice(playerIndex, 1);
+      console.log(
+        `[RoomManager] Removed player ${playerId} from room ${roomId}`
+      );
+      if (room.users.length === 0) {
+        // Jeśli pokój jest pusty, usuń go
+        removeRoom(roomId);
+      } else if (room.users.length === 1 && room.status !== 'waiting') {
+        // Jeśli był pełny, a teraz jest jeden gracz
+        room.status = 'waiting'; // Zmień status na oczekujący
+      }
+      return true;
+    }
+  }
+  return false;
 }
