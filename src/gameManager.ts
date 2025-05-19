@@ -108,8 +108,11 @@ function formatShipsForLog(ships: Ship[], boardSize = 10): string {
 
   ships.forEach(ship => {
     for (let i = 0; i < ship.length; i++) {
-      const x = ship.position.x + (ship.direction ? i : 0);
-      const y = ship.position.y + (ship.direction ? 0 : i);
+      // ODWRÓCONA LOGIKA KIERUNKU: true = pionowy, false = poziomy
+      // Jeśli direction jest true (pionowy), y rośnie.
+      // Jeśli direction jest false (poziomy), x rośnie.
+      const x = ship.position.x + (ship.direction ? 0 : i);
+      const y = ship.position.y + (ship.direction ? i : 0);
       if (x >= 0 && x < boardSize && y >= 0 && y < boardSize) {
         board[y][x] = 'X'; // Mark ship segment
       }
@@ -136,8 +139,11 @@ function getShipAtCoordinates(coordinates: { x: number; y: number }, ships: Ship
     for (let i = 0; i < ship.length; i++) {
       if (ship.hits[i]) continue; // Jeśli segment już trafiony, nie można go trafić ponownie (opcjonalna optymalizacja)
 
-      const shipX = ship.position.x + (ship.direction ? i : 0);
-      const shipY = ship.position.y + (ship.direction ? 0 : i);
+      // ODWRÓCONA LOGIKA KIERUNKU: true = pionowy, false = poziomy
+      // Jeśli direction jest true (pionowy), y rośnie.
+      // Jeśli direction jest false (poziomy), x rośnie.
+      const shipX = ship.position.x + (ship.direction ? 0 : i);
+      const shipY = ship.position.y + (ship.direction ? i : 0);
       // console.log(`[getShipAtCoordinates]   Ship segment ${i}: (${shipX}, ${shipY})`); // Mniej gadatliwe, odkomentuj w razie potrzeby
       if (shipX === coordinates.x && shipY === coordinates.y) {
         console.log(`[getShipAtCoordinates]   >>> HIT on ship type ${ship.type} at segment ${i} (${shipX},${shipY})! Target Coords: (${coordinates.x},${coordinates.y})`);
@@ -160,11 +166,11 @@ function markSurroundingCellsAsMiss(
 ): void {
   const boardSize = 10; // Załóżmy rozmiar planszy 10x10
   for (let i = 0; i < ship.length; i++) {
-    // Kierunek statku: true dla poziomego, false dla pionowego w oryginalnym kodzie.
-    // W mojej implementacji: direction: true dla pionowego, false dla poziomego.
-    // Dostosujmy do oryginalnej logiki, gdzie direction: true to poziomy.
-    const shipX = ship.position.x + (ship.direction ? i : 0); 
-    const shipY = ship.position.y + (ship.direction ? 0 : i); 
+    // ODWRÓCONA LOGIKA KIERUNKU: true = pionowy, false = poziomy
+    // Jeśli direction jest true (pionowy), y rośnie.
+    // Jeśli direction jest false (poziomy), x rośnie.
+    const shipX = ship.position.x + (ship.direction ? 0 : i);
+    const shipY = ship.position.y + (ship.direction ? i : 0);
 
     // Sprawdź 8 sąsiadów + samą komórkę (choć sama komórka już jest trafiona)
     for (let dx = -1; dx <= 1; dx++) {
@@ -259,8 +265,11 @@ export function handleAttack(
       shipKilled = hitShip;
       // Update all shots for this ship to 'killed' status
       for (let i = 0; i < hitShip.length; i++) {
-        const shipX = hitShip.position.x + (hitShip.direction ? i : 0);
-        const shipY = hitShip.position.y + (hitShip.direction ? 0 : i);
+        // ODWRÓCONA LOGIKA KIERUNKU: true = pionowy, false = poziomy
+        // Jeśli direction jest true (pionowy), y rośnie.
+        // Jeśli direction jest false (poziomy), x rośnie.
+        const shipX = hitShip.position.x + (hitShip.direction ? 0 : i);
+        const shipY = hitShip.position.y + (hitShip.direction ? i : 0);
         const shotIndex = defendingPlayer.board.shotsReceived.findIndex(s => s.x === shipX && s.y === shipY);
         if (shotIndex !== -1) {
           defendingPlayer.board.shotsReceived[shotIndex].result = 'killed';
