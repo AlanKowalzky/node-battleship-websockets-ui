@@ -11,10 +11,18 @@ export interface Ship {
   type: 'small' | 'medium' | 'large' | 'huge';
 }
 
+export interface Shot {
+  x: number;
+  y: number;
+  result: 'miss' | 'shot' | 'killed'; // 'killed' indicates the shot that sunk the ship
+  // shipType?: Ship['type']; // Optional: If 'killed', what type of ship was it? Client can deduce from ship object.
+}
+
 export interface PlayerBoard {
   ships: Ship[];
   // Można dodać tutaj planszę strzałów, jeśli chcemy ją przechowywać po stronie serwera
   // shots: { x: number; y: number; result: 'miss' | 'hit' | 'sunk' }[];
+  shotsReceived: Shot[]; // Shots made by the opponent on this player's board
 }
 
 export interface Game {
@@ -25,6 +33,7 @@ export interface Game {
   ];
   currentPlayerIndex: number; // 0 dla gracza 1, 1 dla gracza 2
   status: 'pending_ships' | 'playing' | 'finished';
+  winner?: number; // playerId of the winner
 }
 
 const activeGames = new Map<number, Game>();
@@ -38,8 +47,8 @@ export function createNewGame(gameId: number, player1: RoomUser, player2: RoomUs
   const newGame: Game = {
     gameId,
     players: [
-      { playerId: player1.index, playerName: player1.name, ws: player1.ws },
-      { playerId: player2.index, playerName: player2.name, ws: player2.ws },
+      { playerId: player1.index, playerName: player1.name, ws: player1.ws, board: { ships: [], shotsReceived: [] } },
+      { playerId: player2.index, playerName: player2.name, ws: player2.ws, board: { ships: [], shotsReceived: [] } },
     ],
     currentPlayerIndex: Math.random() < 0.5 ? 0 : 1, // Losowo wybierz, kto zaczyna
     status: 'pending_ships',
@@ -65,16 +74,135 @@ export function addShipsToGame(gameId: number, playerId: number, ships: Ship[]):
     return { error: 'Player has already submitted ships for this game' };
   }
 
-  game.players[playerIndex].board = { ships };
+  game.players[playerIndex].board = { ships, shotsReceived: [] }; // Initialize shotsReceived
   console.log(`[GameManager] Ships added for player ${game.players[playerIndex].playerName} (ID: ${playerId}) in game ${gameId}`);
 
   // Sprawdź, czy obaj gracze dodali statki
-  if (game.players[0].board && game.players[1].board) {
+  if (game.players[0].board?.ships.length && game.players[1].board?.ships.length) {
     game.status = 'playing';
     console.log(`[GameManager] Both players have submitted ships for game ${gameId}. Game status changed to 'playing'.`);
   }
 
   return { game };
+}
+
+function getShipAtCoordinates(coordinates: { x: number; y: number }, ships: Ship[]): Ship | undefined {
+  for (const ship of ships) {
+    for (let i = 0; i < ship.length; i++) {
+      const shipX = ship.position.x + (ship.direction ? i : 0);
+      const shipY = ship.position.y + (ship.direction ? 0 : i);
+      if (shipX === coordinates.x && shipY === coordinates.y) {
+        return ship;
+      }
+    }
+  }
+  return undefined;
+}
+
+function isShipKilled(ship: Ship, shotsReceived: Shot[]): boolean {
+  let hitCount = 0;
+  for (let i = 0; i < ship.length; i++) {
+    const shipX = ship.position.x + (ship.direction ? i : 0);
+    const shipY = ship.position.y + (ship.direction ? 0 : i);
+    if (shotsReceived.some(shot => shot.x === shipX && shot.y === shipY && (shot.result === 'shot' || shot.result === 'killed'))) {
+      hitCount++;
+    }
+  }
+  return hitCount === ship.length;
+}
+
+function checkWinCondition(defendingPlayerBoard: PlayerBoard): boolean {
+  if (!defendingPlayerBoard || !defendingPlayerBoard.ships || !defendingPlayerBoard.shotsReceived) return false;
+  return defendingPlayerBoard.ships.every(ship => isShipKilled(ship, defendingPlayerBoard.shotsReceived));
+}
+
+export interface AttackResultDetails {
+  gameId: number;
+  attackingPlayerId: number;
+  coordinates: { x: number; y: number };
+  result: 'miss' | 'shot' | 'killed';
+  shipKilled?: Ship;
+  turnChanged: boolean;
+  nextPlayerId: number;
+  winner?: number;
+  error?: string;
+}
+
+export function handleAttack(
+  gameId: number,
+  attackingPlayerId: number,
+  coordinates: { x: number; y: number }
+): AttackResultDetails {
+  const game = activeGames.get(gameId);
+  if (!game) return { error: 'Game not found' } as AttackResultDetails;
+  if (game.status !== 'playing') return { error: 'Game is not active' } as AttackResultDetails;
+
+  const attackingPlayerIndex = game.players.findIndex(p => p.playerId === attackingPlayerId);
+  if (attackingPlayerIndex === -1) return { error: 'Attacking player not found in this game' } as AttackResultDetails;
+  if (game.currentPlayerIndex !== attackingPlayerIndex) return { error: 'Not your turn' } as AttackResultDetails;
+
+  if (coordinates.x < 0 || coordinates.x > 9 || coordinates.y < 0 || coordinates.y > 9) {
+    return { error: 'Invalid coordinates' } as AttackResultDetails;
+  }
+
+  const defendingPlayerIndex = 1 - attackingPlayerIndex;
+  const defendingPlayer = game.players[defendingPlayerIndex];
+
+  if (!defendingPlayer.board) return { error: 'Defending player board not set up' } as AttackResultDetails;
+
+  if (defendingPlayer.board.shotsReceived.some(shot => shot.x === coordinates.x && shot.y === coordinates.y)) {
+    return { error: 'Cell already shot' } as AttackResultDetails;
+  }
+
+  let attackResult: 'miss' | 'shot' | 'killed' = 'miss';
+  let shipKilled: Ship | undefined = undefined;
+  let turnChanged = true;
+
+  const hitShip = getShipAtCoordinates(coordinates, defendingPlayer.board.ships);
+
+  if (hitShip) {
+    attackResult = 'shot';
+    turnChanged = false; // Player continues turn on hit
+
+    // Record the shot
+    defendingPlayer.board.shotsReceived.push({ x: coordinates.x, y: coordinates.y, result: 'shot' });
+
+    if (isShipKilled(hitShip, defendingPlayer.board.shotsReceived)) {
+      attackResult = 'killed';
+      shipKilled = hitShip;
+      // Update all shots for this ship to 'killed' status
+      for (let i = 0; i < hitShip.length; i++) {
+        const shipX = hitShip.position.x + (hitShip.direction ? i : 0);
+        const shipY = hitShip.position.y + (hitShip.direction ? 0 : i);
+        const shotIndex = defendingPlayer.board.shotsReceived.findIndex(s => s.x === shipX && s.y === shipY);
+        if (shotIndex !== -1) {
+          defendingPlayer.board.shotsReceived[shotIndex].result = 'killed';
+        }
+      }
+      console.log(`[GameManager] Ship killed: ${hitShip.type} in game ${gameId}`);
+    }
+  } else {
+    attackResult = 'miss';
+    defendingPlayer.board.shotsReceived.push({ x: coordinates.x, y: coordinates.y, result: 'miss' });
+  }
+
+  let winner: number | undefined = undefined;
+  if (attackResult === 'killed' || attackResult === 'shot') { // Check win only if it was a hit
+    if (checkWinCondition(defendingPlayer.board)) {
+      winner = attackingPlayerId;
+      game.status = 'finished';
+      game.winner = winner;
+      console.log(`[GameManager] Game ${gameId} finished. Winner: ${attackingPlayerId}`);
+    }
+  }
+
+  if (turnChanged && game.status === 'playing') {
+    game.currentPlayerIndex = defendingPlayerIndex;
+  }
+  const nextPlayerId = game.players[game.currentPlayerIndex].playerId;
+
+  console.log(`[GameManager] Attack in game ${gameId} by ${attackingPlayerId} at (${coordinates.x},${coordinates.y}): ${attackResult}. Turn changed: ${turnChanged}. Next player: ${nextPlayerId}`);
+  return { gameId, attackingPlayerId, coordinates, result: attackResult, shipKilled, turnChanged, nextPlayerId, winner };
 }
 
 export function getGameById(gameId: number): Game | undefined {

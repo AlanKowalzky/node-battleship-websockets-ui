@@ -9,6 +9,8 @@ import { sendMessageToClient, sendUpdateWinners, sendUpdateRoom } from './index.
 interface RegData { name: string; password: string; }
 interface AddUserToRoomData { indexRoom: number; }
 interface AddShipsData { gameId: number; ships: gameManager.Ship[]; indexPlayer: number; } // gameManager.Ship jest już poprawne
+interface AttackData { gameId: number; x: number; y: number; indexPlayer: number; }
+
 export function handleWebSocketMessage(
   client: WebSocket,
   parsedMessage: ClientMessage,
@@ -111,6 +113,74 @@ export function handleWebSocketMessage(
         break;
       }
 
+      case 'attack':
+      case 'randomAttack': { // For now, randomAttack is handled like attack, client sends coords
+        if (client.playerId === undefined) {
+          responseData = { error: true, errorText: 'Player not registered/logged in' };
+          responseType = type; // 'attack' or 'randomAttack'
+          break;
+        }
+        if (!data) {
+          throw new Error(`Data for "${type}" command is missing.`);
+        }
+        const { gameId, x, y, indexPlayer } = JSON.parse(data) as AttackData;
+
+        if (client.playerId !== indexPlayer) {
+          responseData = { error: true, errorText: 'Player ID mismatch for attack command' };
+          responseType = type;
+          break;
+        }
+
+        const game = gameManager.getGameById(gameId);
+        if (!game) {
+          responseData = { error: true, errorText: 'Game not found' };
+          responseType = type;
+          break;
+        }
+
+        // Ensure both players are still connected (basic check)
+        const player1 = game.players[0];
+        const player2 = game.players[1];
+        if (!player1.ws || !player2.ws) {
+            console.warn(`[MessageHandler] Attack in game ${gameId} aborted, one player disconnected.`);
+            // Optionally, handle game termination here
+            responseData = { error: true, errorText: 'Opponent disconnected' };
+            responseType = type;
+            // Consider ending the game if a player is missing
+            break;
+        }
+
+        const attackResultDetails = gameManager.handleAttack(gameId, client.playerId, { x, y });
+
+        if (attackResultDetails.error) {
+          responseData = { error: true, errorText: attackResultDetails.error };
+          responseType = type;
+        } else {
+          // No direct response to the attacker for 'attack' command itself.
+          // Updates will be sent via broadcasted 'attack', 'turn', 'finish'.
+          const attackMessagePayload: any = {
+            position: { x: attackResultDetails.coordinates.x, y: attackResultDetails.coordinates.y },
+            currentPlayer: attackResultDetails.attackingPlayerId, // The player who made the shot
+            status: attackResultDetails.result,
+          };
+          if (attackResultDetails.shipKilled) {
+            attackMessagePayload.ship = attackResultDetails.shipKilled;
+          }
+
+          // Send 'attack' update to both players
+          game.players.forEach(p => {
+            if (p.ws) sendMessageToClient(p.ws, 'attack', attackMessagePayload);
+          });
+          console.log(`[MessageHandler] Broadcasted 'attack' for game ${gameId}: ${JSON.stringify(attackMessagePayload)}`);
+
+          // Subsequent 'turn' or 'finish' messages will be handled after the switch
+        }
+        // Important: Do not set responseData here if successful,
+        // as the flow continues to send turn/finish messages.
+        // Only set responseData for direct errors to the attacking client.
+        break;
+      }
+
       default:
         responseData = { message: `Received and processed command: ${type}` };
         console.log(`[MessageHandler] Unknown command type: ${type}`);
@@ -167,6 +237,35 @@ export function handleWebSocketMessage(
         // Gra się rozpoczęła, nie ma potrzeby wysyłać update_room, bo pokój już został usunięty
       }
     }
+
+    // Handle turn and finish messages after attack or randomAttack
+    if ((type === 'attack' || type === 'randomAttack') && !responseData?.error) {
+      if (!data) return; // Should have been caught earlier
+      const { gameId } = JSON.parse(data) as AttackData; // or RandomAttackData
+      const game = gameManager.getGameById(gameId); // Get the potentially updated game state
+
+      if (game) {
+        if (game.status === 'finished' && game.winner !== undefined) {
+          const winnerId = game.winner;
+          const finishPayload = { winPlayer: winnerId };
+          game.players.forEach(p => {
+            if (p.ws) sendMessageToClient(p.ws, 'finish', finishPayload);
+          });
+          console.log(`[MessageHandler] Broadcasted 'finish' for game ${gameId}: ${JSON.stringify(finishPayload)}`);
+          
+          playerStore.addWinner(winnerId); // Update winners list
+          shouldSendUpdateWinners = true;  // Trigger broadcast
+          gameManager.removeGame(gameId);  // Clean up game
+        } else if (game.status === 'playing') {
+          const turnPayload = { currentPlayer: game.players[game.currentPlayerIndex].playerId };
+          game.players.forEach(p => {
+            if (p.ws) sendMessageToClient(p.ws, 'turn', turnPayload);
+          });
+          console.log(`[MessageHandler] Broadcasted 'turn' for game ${gameId}: ${JSON.stringify(turnPayload)}`);
+        }
+      }
+    }
+
 
     if (shouldSendUpdateWinners) {
       sendUpdateWinners(wss);
