@@ -28,8 +28,8 @@ export interface PlayerBoard {
 export interface Game {
   gameId: number;
   players: [
-    { playerId: number; playerName: string; board?: PlayerBoard; ws?: WebSocket }, // Gracz 1
-    { playerId: number; playerName: string; board?: PlayerBoard; ws?: WebSocket }  // Gracz 2
+    { playerId: number; playerName: string; board: PlayerBoard; ws?: WebSocket; isBot?: boolean }, // Gracz 1 (może być botem)
+    { playerId: number; playerName: string; board: PlayerBoard; ws?: WebSocket; isBot?: boolean }  // Gracz 2 (może być botem)
   ];
   currentPlayerIndex: number; // 0 dla gracza 1, 1 dla gracza 2
   status: 'pending_ships' | 'playing' | 'finished';
@@ -38,24 +38,36 @@ export interface Game {
 
 const activeGames = new Map<number, Game>();
 
-export function createNewGame(gameId: number, player1: RoomUser, player2: RoomUser): Game {
+// Definicja typu dla gracza przekazywanego do createNewGame
+interface GamePlayerInput {
+    playerId: number;
+    playerName: string;
+    ws?: WebSocket; // Opcjonalne, bot nie będzie miał ws
+    isBot?: boolean; // Flaga wskazująca, czy to bot
+}
+
+export function createNewGame(gameId: number, player1Input: GamePlayerInput, player2Input: GamePlayerInput): Game {
   if (activeGames.has(gameId)) {
     // To nie powinno się zdarzyć, jeśli gameId jest unikalne
     console.warn(`[GameManager] Game with ID ${gameId} already exists. Overwriting.`);
   }
 
+  // Przygotuj obiekty graczy dla stanu gry, inicjalizując plansze
+  const p1GameData = { ...player1Input, board: { ships: [], shotsReceived: [] } };
+  const p2GameData = { ...player2Input, board: { ships: [], shotsReceived: [] } };
+
   const newGame: Game = {
     gameId,
     players: [
-      { playerId: player1.index, playerName: player1.name, ws: player1.ws, board: { ships: [], shotsReceived: [] } },
-      { playerId: player2.index, playerName: player2.name, ws: player2.ws, board: { ships: [], shotsReceived: [] } },
+      p1GameData as { playerId: number; playerName: string; board: PlayerBoard; ws?: WebSocket; isBot?: boolean },
+      p2GameData as { playerId: number; playerName: string; board: PlayerBoard; ws?: WebSocket; isBot?: boolean },
     ],
     currentPlayerIndex: Math.random() < 0.5 ? 0 : 1, // Losowo wybierz, kto zaczyna
     status: 'pending_ships',
   };
 
   activeGames.set(gameId, newGame);
-  console.log(`[GameManager] Created new game: ${gameId} with players ${player1.name} and ${player2.name}. Player ${newGame.players[newGame.currentPlayerIndex].playerName} starts.`);
+  console.log(`[GameManager] Created new game: ${gameId} with players ${player1Input.playerName} and ${player2Input.playerName}. Player ${newGame.players[newGame.currentPlayerIndex].playerName} starts.`);
   return newGame;
 }
 
@@ -70,7 +82,8 @@ export function addShipsToGame(gameId: number, playerId: number, ships: Ship[]):
     return { error: 'Player not found in this game' };
   }
 
-  if (game.players[playerIndex].board) {
+  // Sprawdź, czy plansza już istnieje i ma statki (dla pewności, choć logika powinna tego unikać)
+  if (game.players[playerIndex].board && game.players[playerIndex].board.ships.length > 0) {
     return { error: 'Player has already submitted ships for this game' };
   }
 

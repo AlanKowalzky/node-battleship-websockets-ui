@@ -3,6 +3,7 @@ import * as WS_NAMESPACE from 'ws'; // Importuj wszystko jako WS_NAMESPACE
 import * as playerStore from '../playerStore.js'; // Importujemy nasz playerStore
 import * as roomManager from '../roomManager.js'; // Importujemy roomManager
 import { ClientMessage } from '../types/websocket.js'; // Importujemy nasz interfejs
+import { sendMessageToClient, broadcastMessage } from './messageSender.js'; // Importujemy z messageSender
 import { handleWebSocketMessage } from './messageHandler.js'; // Importujemy główny handler wiadomości
 
 // Rozszerzenie typu WebSocket o niestandardowe właściwości
@@ -13,40 +14,6 @@ declare module 'ws' {
   }
 }
 
-// Funkcja pomocnicza do wysyłania wiadomości do konkretnego klienta
-export function sendMessageToClient(client: WS_NAMESPACE.default, type: string, data: any, id: number = 0) {
-    // Upewnij się, że data jest obiektem, a nie stringiem JSON, jeśli frontend tego oczekuje
-    const message = JSON.stringify({ type, data: data, id });
-    // Poprawnie jest używać stałej z klasy WebSocket
-    if (client.readyState === WS_NAMESPACE.default.OPEN) {
-        client.send(message);
-    } else {
-        console.warn(`[WebSocket/index] Attempted to send message to client with ID ${client.playerId} but connection is not open. State: ${client.readyState}`);
-    }
-}
-
-// Funkcja pomocnicza do wysyłania wiadomości do wszystkich połączonych klientów
-export function broadcastMessage(wss: WS_NAMESPACE.WebSocketServer, type: string, data: any, id: number = 0) {
-  // Upewnij się, że pole 'data' jest stringiem JSON, jeśli 'data' nie jest już stringiem
-  const message = JSON.stringify({ type, data: data, id });
-  
-  wss.clients.forEach((client: WS_NAMESPACE.default) => {
-    if (client.readyState === WS_NAMESPACE.default.OPEN) {
-      client.send(message);
-    }
-  });
-}
-
-export function sendUpdateRoom(wss: WS_NAMESPACE.WebSocketServer) {
-  broadcastMessage(wss, 'update_room', roomManager.getAvailableRooms());
-  console.log('[WebSocket/index] Broadcasted update_room.');
-}
-
-export function sendUpdateWinners(wss: WS_NAMESPACE.WebSocketServer) {
-  broadcastMessage(wss, 'update_winners', playerStore.getWinnersList());
-  console.log('[WebSocket/index] Broadcasted update_winners.');
-}
-
 export async function createWebSocketServer(port: number): Promise<WS_NAMESPACE.WebSocketServer> { // Użyjemy typu WebSocketServer z domyślnego eksportu
   console.log(`WebSocket server is trying to start on port ${port}.`);
   
@@ -54,9 +21,17 @@ export async function createWebSocketServer(port: number): Promise<WS_NAMESPACE.
   // W module 'ws', klasa serwera jest często dostępna jako 'Server' na domyślnym eksporcie
   // lub jako 'WebSocketServer' na domyślnym eksporcie.
   // Jeśli WS_NAMESPACE to obiekt modułu, a default to główny eksport:
-  const ServerClass = (WS_NAMESPACE.default as any)?.Server || (WS_NAMESPACE.default as any)?.WebSocketServer || WS_NAMESPACE.WebSocketServer || WS_NAMESPACE.Server;
-  if (!ServerClass || typeof ServerClass !== 'function') throw new TypeError("WebSocketServer constructor not found in 'ws' module.");
-  const wss = new ServerClass({ port });
+  // Sprawdźmy, czy WS_NAMESPACE.default jest konstruktorem (co jest typowe dla modułów CommonJS importowanych do ESM)
+  // lub czy WS_NAMESPACE.WebSocketServer jest konstruktorem.
+  let ServerClassToUse: typeof WS_NAMESPACE.WebSocketServer;
+  if (typeof WS_NAMESPACE.default === 'function' && (WS_NAMESPACE.default as any).Server) { // Sprawdź, czy default.Server istnieje i jest funkcją
+    ServerClassToUse = (WS_NAMESPACE.default as any).Server;
+  } else if (typeof WS_NAMESPACE.WebSocketServer === 'function') {
+    ServerClassToUse = WS_NAMESPACE.WebSocketServer;
+  } else {
+    throw new TypeError("Cannot find WebSocketServer constructor in 'ws' module.");
+  }
+  const wss = new ServerClassToUse({ port });
 
   // Add error handling for the server itself
   wss.on('error', (error: Error) => {
@@ -91,10 +66,10 @@ export async function createWebSocketServer(port: number): Promise<WS_NAMESPACE.
         console.error('[WebSocket] Failed to parse message or handle request:', error);
         const errorResponse = {
           type: 'error', // Typ błędu
-          data: JSON.stringify({ message: 'Invalid message format' }),
-          id: parsedMessage?.id || 0, // Użyj ID z sparsowanej wiadomości, jeśli dostępne, w przeciwnym razie 0
+          data: { message: 'Invalid message format or error processing' }, // data jako obiekt, sendMessageToClient to zstringifikuje
+          id: parsedMessage?.id || 0, 
         };
-        client.send(JSON.stringify(errorResponse));
+        sendMessageToClient(client, 'error', errorResponse.data, errorResponse.id); // Użyj sendMessageToClient
       }
     });
 
@@ -111,4 +86,15 @@ export async function createWebSocketServer(port: number): Promise<WS_NAMESPACE.
   });
 
   return wss;
+}
+
+// Funkcje do wysyłania konkretnych typów wiadomości (pozostają tutaj, bo potrzebują wss)
+export function sendUpdateRoom(wss: WS_NAMESPACE.WebSocketServer) {
+  broadcastMessage(wss, 'update_room', roomManager.getAvailableRooms());
+  console.log('[WebSocket/index] Broadcasted update_room.');
+}
+
+export function sendUpdateWinners(wss: WS_NAMESPACE.WebSocketServer) {
+  broadcastMessage(wss, 'update_winners', playerStore.getWinnersList());
+  console.log('[WebSocket/index] Broadcasted update_winners.');
 }

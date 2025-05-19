@@ -140,3 +140,8 @@ export function resetRoomManager() {
   nextGameId = 1;
   console.log('[RoomManager] Room manager has been reset.');
 }
+
+// Funkcja do pobierania następnego unikalnego ID gry
+export function getNextGameId(): number {
+  return nextGameId++;
+}

@@ -3,7 +3,9 @@ import * as playerStore from '../playerStore.js';
 import * as roomManager from '../roomManager.js'; // Dodajemy roomManager
 import * as gameManager from '../gameManager.js'; // Dodajemy gameManager
 import { ClientMessage } from '../types/websocket.js';
-import { sendMessageToClient, sendUpdateWinners, sendUpdateRoom } from './index.js'; // Dodajemy sendUpdateRoom
+import { sendMessageToClient, broadcastMessage } from './messageSender.js'; // Importujemy z messageSender
+import * as bot from '../bot.js'; // Importujemy moduł bota
+import { sendUpdateRoom, sendUpdateWinners } from './index.js'; // Importujemy specyficzne funkcje broadcast z index.js
 
 // Definicja typów dla danych oczekiwanych przez różne komendy
 interface RegData { name: string; password: string; }
@@ -11,6 +13,7 @@ interface AddUserToRoomData { indexRoom: number; }
 interface AddShipsData { gameId: number; ships: gameManager.Ship[]; indexPlayer: number; } // gameManager.Ship jest już poprawne
 interface AttackData { gameId: number; x: number; y: number; indexPlayer: number; }
 
+// Funkcja do obsługi tury bota (wywoływana przez serwer)
 export function handleWebSocketMessage(
   client: WebSocket,
   parsedMessage: ClientMessage,
@@ -24,6 +27,7 @@ export function handleWebSocketMessage(
   let attackResultDetailsFromSwitch: gameManager.AttackResultDetails | undefined = undefined;
   let shouldSendUpdateRoom = false;
 
+  // Parsowanie danych tylko raz, jeśli istnieją
   console.log(
     `[MessageHandler] Processing command: ${type}, ID: ${id}, Raw Data: ${data}`
   );
@@ -66,6 +70,45 @@ export function handleWebSocketMessage(
         break;
       }
 
+      case 'create_single_player_game': {
+        if (client.playerId === undefined || client.playerName === undefined) {
+          responseData = { error: true, errorText: 'Player not registered/logged in' };
+          responseType = 'create_single_player_game';
+        } else {
+          // Stwórz wirtualnego gracza-bota
+          // Używamy ujemnego ID, aby odróżnić od graczy ludzkich
+          const botPlayerId = -1; // Stałe ID dla bota w grze 1vBot
+          const botPlayer = { playerId: botPlayerId, playerName: "Bot", isBot: true };
+
+          // Utwórz nową grę z graczem ludzkim i botem
+          // gameManager.createNewGame oczekuje teraz GamePlayer, nie RoomUser
+          const humanPlayerForGame = { playerId: client.playerId, playerName: client.playerName, ws: client };
+          const gameId = roomManager.getNextGameId(); // Użyj funkcji z roomManager do pobrania unikalnego ID gry
+          const newGame = gameManager.createNewGame(gameId, humanPlayerForGame, botPlayer);
+
+          // Bot rozmieszcza statki
+          const botShips = bot.placeBotShips();
+          gameManager.addShipsToGame(gameId, botPlayerId, botShips);
+
+          // Gracz ludzki musi jeszcze rozmieścić statki (komenda add_ships)
+          // Wyślij wiadomość create_game do gracza ludzkiego
+          sendMessageToClient(client, 'create_game', {
+            idGame: newGame.gameId,
+            // W grze 1vBot, gracz ludzki jest zawsze pierwszy (index 0) lub drugi (index 1)
+            // i jego gamePlayerId (1 lub 2) jest determinowane przez jego pozycję w tablicy.
+            // gameManager.createNewGame losuje, kto zaczyna (currentPlayerIndex),
+            // ale idPlayer w create_game powinno być stałe dla gracza.
+            // Załóżmy, że gracz ludzki to player1Input w createNewGame, więc jego gamePlayerId to 1.
+            // Lub, jeśli bot jest zawsze player2Input, to gamePlayerId gracza ludzkiego to 1.
+            // Dla uproszczenia, przypiszmy graczowi ludzkiemu idPlayer = 1 w grze z botem.
+            idPlayer: 1, // Gracz ludzki w grze z botem
+          });
+          console.log(`[MessageHandler] Created single player game ${newGame.gameId} for player ${client.playerName} (ID: ${client.playerId}) vs Bot.`);
+          // Gra przejdzie do statusu 'playing' i wyśle start_game/turn po tym, jak gracz ludzki doda statki
+        }
+        break;
+      }
+
       case 'add_user_to_room': {
         if (client.playerId === undefined || client.playerName === undefined) {
           responseData = { error: true, errorText: 'Player not registered/logged in' };
@@ -76,7 +119,7 @@ export function handleWebSocketMessage(
           }
           const { indexRoom } = JSON.parse(data) as AddUserToRoomData;
           const result = roomManager.addUserToRoom(indexRoom, client.playerId, client.playerName, client);
-
+          
           if (result.error) {
             responseData = { error: true, errorText: result.error };
             responseType = 'add_user_to_room';
@@ -196,7 +239,7 @@ export function handleWebSocketMessage(
           responseData = { error: true, errorText: attackResultDetailsFromSwitch.error };
           responseType = 'randomAttack';
         } else {
-           // Wiadomość 'attack' z wynikiem strzału zostanie wysłana poniżej, jeśli nie ma błędu
+           // Wiadomość 'attack' z wynikiem strzału zostanie wysłana poniżej, jeśli nie ma błędu (wspólny blok)
         }
         break;
       }
@@ -220,8 +263,19 @@ export function handleWebSocketMessage(
         if (room && room.status === 'ready' && room.users.length === 2 && room.gameId !== undefined) {
             console.log(`[MessageHandler] Room ${room.id} is full. Initializing game ${room.gameId}.`);
             // Utwórz grę w gameManager
-            gameManager.createNewGame(room.gameId, room.users[0], room.users[1]);
-            room.users.forEach((userInRoom: roomManager.RoomUser) => { // Dodano typ dla userInRoom
+            // Mapuj RoomUser na GamePlayerInput
+            const player1Input = {
+              playerId: room.users[0].index,
+              playerName: room.users[0].name,
+              ws: room.users[0].ws,
+            };
+            const player2Input = {
+              playerId: room.users[1].index,
+              playerName: room.users[1].name,
+              ws: room.users[1].ws,
+            };
+            gameManager.createNewGame(room.gameId, player1Input, player2Input);
+            room.users.forEach((userInRoom: roomManager.RoomUser) => {
                 if (userInRoom.ws && userInRoom.gamePlayerId !== undefined) {
                     sendMessageToClient(userInRoom.ws, 'create_game', {
                         idGame: room.gameId,
@@ -242,7 +296,7 @@ export function handleWebSocketMessage(
       const game = gameManager.getGameById(gameId);
       if (game && game.status === 'playing') {
         console.log(`[MessageHandler] Game ${game.gameId} is ready to start. Sending start_game and turn messages.`);
-        game.players.forEach((player: typeof game.players[0], playerGameIndex: number) => { // Dodano typy
+        game.players.forEach((player: typeof game.players[0], playerGameIndex: number) => {
           if (player.ws && player.board) { // Upewnij się, że board istnieje
             sendMessageToClient(player.ws, 'start_game', {
               ships: player.board.ships, // Pozycje własnych statków
@@ -261,7 +315,7 @@ export function handleWebSocketMessage(
     // Handle turn and finish messages after attack or randomAttack
     // Ten blok jest teraz kluczowy dla wysyłania aktualizacji po udanym ataku (zwykłym lub losowym)
     if ((type === 'attack' || type === 'randomAttack') && !responseData?.error) {
-      // Użyj attackResultDetailsFromSwitch, które zostało ustawione w bloku switch
+      // Użyj attackResultDetailsFromSwitch, które zostało ustawione w bloku switch dla 'attack'/'randomAttack'
       if (attackResultDetailsFromSwitch && !attackResultDetailsFromSwitch.error) {
         const game = gameManager.getGameById(attackResultDetailsFromSwitch.gameId);
         if (!game) {
@@ -279,7 +333,7 @@ export function handleWebSocketMessage(
         if (attackResultDetailsFromSwitch.shipKilled) {
           attackMessagePayload.ship = attackResultDetailsFromSwitch.shipKilled;
         }
-        game.players.forEach((p: typeof game.players[0]) => { // Dodano typ dla p
+        game.players.forEach((p: typeof game.players[0]) => {
           if (p.ws) sendMessageToClient(p.ws, 'attack', attackMessagePayload);
         });
         console.log(`[MessageHandler] Broadcasted 'attack' for game ${attackResultDetailsFromSwitch.gameId}: ${JSON.stringify(attackMessagePayload)}`);
@@ -288,7 +342,7 @@ export function handleWebSocketMessage(
         if (game.status === 'finished' && game.winner !== undefined) {
           const winnerId = game.winner;
           const finishPayload = { winPlayer: winnerId };
-          game.players.forEach((p: typeof game.players[0]) => { // Dodano typ dla p
+          game.players.forEach((p: typeof game.players[0]) => {
             if (p.ws) sendMessageToClient(p.ws, 'finish', finishPayload);
           });
           console.log(`[MessageHandler] Broadcasted 'finish' for game ${game.gameId}: ${JSON.stringify(finishPayload)}`);
@@ -298,22 +352,119 @@ export function handleWebSocketMessage(
           gameManager.removeGame(game.gameId);
         } else if (game.status === 'playing') {
           const turnPayload = { currentPlayer: game.players[game.currentPlayerIndex].playerId };
-          game.players.forEach((p: typeof game.players[0]) => { // Dodano typ dla p
+          game.players.forEach((p: typeof game.players[0]) => {
             if (p.ws) sendMessageToClient(p.ws, 'turn', turnPayload);
           });
           console.log(`[MessageHandler] Broadcasted 'turn' for game ${game.gameId}: ${JSON.stringify(turnPayload)}`);
+
+          // Jeśli po zmianie tury (lub kontynuacji) jest tura bota, wywołaj logikę bota
+          const currentPlayer = game.players[game.currentPlayerIndex];
+          if (currentPlayer.isBot) {
+             console.log(`[MessageHandler] It's Bot's turn in game ${game.gameId}. Triggering bot move.`);
+             // Użyj setImmediate, aby uniknąć blokowania pętli zdarzeń
+             setImmediate(() => {
+                 handleBotTurn(game.gameId, currentPlayer.playerId, wss);
+             });
+          }
         }
       } // koniec if (attackResultDetailsFromSwitch && !attackResultDetailsFromSwitch.error)
     }
 
+    // Nowa funkcja do obsługi tury bota
+    async function handleBotTurn(gameId: number, botPlayerId: number, wss: WebSocketServer) {
+      // Ta funkcja jest wywoływana asynchronicznie (przez setImmediate)
+      // Logika ataku bota i wysyłania wiadomości jest taka sama jak dla gracza ludzkiego,
+      // ale koordynaty są generowane przez bota.
+      // Możemy po prostu wywołać logikę randomAttack (która teraz używa bot.makeBotShot)
+      // i następnie ponownie wywołać logikę wysyłania wiadomości turn/finish.
+      // Ponieważ randomAttack już zwraca AttackResultDetails, możemy jej użyć.
 
-    if (shouldSendUpdateWinners) {
-      sendUpdateWinners(wss);
-      console.log('[MessageHandler] Triggered update_winners broadcast.');
+      const game = gameManager.getGameById(gameId);
+      if (!game || game.status === 'pending_ships' || game.status === 'finished') {
+          console.warn(`[MessageHandler] Bot turn attempted for game ${gameId} but game not found or not playing.`);
+          return; // Gra już nie istnieje lub nie jest aktywna
+      }
+
+      // Sprawdź, czy to na pewno tura tego bota
+      const currentPlayer = game.players[game.currentPlayerIndex];
+      if (!currentPlayer.isBot || currentPlayer.playerId !== botPlayerId) {
+           console.warn(`[MessageHandler] Bot turn attempted for game ${gameId} but it's not bot ${botPlayerId}'s turn.`);
+           return;
+      }
+
+      const botAttackResultDetails = gameManager.handleRandomAttack(gameId, botPlayerId);
+
+      if (botAttackResultDetails.error) {
+          console.error(`[MessageHandler] Bot attack failed in game ${gameId}: ${botAttackResultDetails.error}`);
+          // Co zrobić w przypadku błędu bota? Zakończyć grę? Przekazać turę? Na razie logujemy.
+          // Można by tu dodać logikę przekazania tury, jeśli bot nie może strzelić.
+          // game.currentPlayerIndex = 1 - game.players.findIndex(p => p.playerId === botPlayerId);
+          // const turnPayload = { currentPlayer: game.players[game.currentPlayerIndex].playerId };
+          // game.players.forEach(p => { if (p.ws) sendMessageToClient(p.ws, 'turn', turnPayload); });
+          return;
+      }
+
+      // Logika wysyłania wiadomości 'attack', 'turn', 'finish' po ataku bota
+      // Jest taka sama jak dla gracza ludzkiego, więc możemy ją wywołać.
+      // Wiadomość 'attack' (od bota) do gracza ludzkiego
+      const attackMessagePayload: any = {
+        position: { x: botAttackResultDetails.coordinates.x, y: botAttackResultDetails.coordinates.y },
+        currentPlayer: botAttackResultDetails.attackingPlayerId, // ID bota
+        status: botAttackResultDetails.result,
+      };
+      if (botAttackResultDetails.shipKilled) {
+        attackMessagePayload.ship = botAttackResultDetails.shipKilled;
+      }
+      // Wysyłamy tylko do gracza ludzkiego (bot nie ma ws)
+      const humanPlayer = game.players.find(p => !p.isBot);
+      if (humanPlayer?.ws) {
+          sendMessageToClient(humanPlayer.ws, 'attack', attackMessagePayload);
+          console.log(`[MessageHandler] Sent 'attack' from Bot for game ${gameId}: ${JSON.stringify(attackMessagePayload)}`);
+      }
+
+      // Logika 'finish' lub 'turn' po ataku bota
+      if (game.status === 'finished' && game.winner !== undefined) {
+        const winnerId = game.winner;
+        const finishPayload = { winPlayer: winnerId };
+        // Wysyłamy tylko do gracza ludzkiego
+        if (humanPlayer?.ws) {
+            sendMessageToClient(humanPlayer.ws, 'finish', finishPayload);
+            console.log(`[MessageHandler] Sent 'finish' from Bot for game ${game.gameId}: ${JSON.stringify(finishPayload)}`);
+        }
+        // Jeśli bot wygrał, dodaj zwycięstwo do jego "konta" (jeśli chcemy śledzić)
+        // playerStore.incrementWins(winnerId); // Jeśli bot ma wpis w playerStore
+        shouldSendUpdateWinners = true; // Trigger broadcast do wszystkich
+        gameManager.removeGame(game.gameId);
+      } else if (game.status === 'playing') {
+        const turnPayload = { currentPlayer: game.players[game.currentPlayerIndex].playerId };
+         // Wysyłamy tylko do gracza ludzkiego
+        if (humanPlayer?.ws) {
+            sendMessageToClient(humanPlayer.ws, 'turn', turnPayload);
+            console.log(`[MessageHandler] Sent 'turn' after Bot move for game ${game.gameId}: ${JSON.stringify(turnPayload)}`);
+        }
+        // Jeśli bot trafił, jego tura trwa - wywołaj handleBotTurn ponownie
+        if (!botAttackResultDetails.turnChanged) { // turnChanged === false oznacza, że tura NIE zmieniła się (bot trafił)
+             console.log(`[MessageHandler] Bot hit! Bot shoots again in game ${game.gameId}.`);
+             setImmediate(() => {
+                 handleBotTurn(game.gameId, botPlayerId, wss);
+             });
+        }
+      } else if (game.status === 'pending_ships') {
+        console.log(`[MessageHandler] Game ${game.gameId} is still waiting for ships to be placed.`);
+      }
+       // Trigger broadcast update_winners jeśli flaga została ustawiona w bloku finish
+       if (shouldSendUpdateWinners) {
+           sendUpdateWinners(wss);
+           console.log('[MessageHandler] Triggered update_winners broadcast after bot game.');
+           shouldSendUpdateWinners = false; // Reset flag
+       }
     }
+
+
     if (shouldSendUpdateRoom) {
       sendUpdateRoom(wss);
       console.log('[MessageHandler] Triggered update_room broadcast.');
+      shouldSendUpdateRoom = false; // Reset flag
     }
 
   } catch (error) {
