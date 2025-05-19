@@ -105,6 +105,7 @@ export function handleWebSocketMessage(
         break;
       }
 
+      case 'single_play': // Dodajemy obsługę aliasu
       case 'create_single_player_game': {
         console.log(
           `[MessageHandler] Received create_single_player_game command from player ID: ${client.playerId}`
@@ -140,23 +141,35 @@ export function handleWebSocketMessage(
           );
 
           const botShips = bot.placeBotShips();
-          gameManager.addShipsToGame(gameId, botPlayerId, botShips);
+          const addBotShipsResult = gameManager.addShipsToGame(gameId, botPlayerId, botShips);
 
-          console.log(
-            `[MessageHandler] Bot ships placed and added to game ${gameId}.`
-          );
+          if (addBotShipsResult.error) {
+            console.error(
+              `[MessageHandler] Failed to add bot ships for game ${gameId}: ${addBotShipsResult.error}`
+            );
+            responseData = {
+              error: true,
+              errorText: `Failed to initialize bot: ${addBotShipsResult.error}`,
+            };
+            responseType = 'create_single_player_game'; // Wyślij błąd pod oryginalnym typem komendy
+          } else {
+            console.log(
+              `[MessageHandler] Bot ships placed and added to game ${gameId}.`
+            );
 
-          sendMessageToClient(client, 'create_game', {
-            idGame: newGame.gameId,
-
-            idPlayer: 1,
-          });
-          console.log(
-            `[MessageHandler] Created single player game ${newGame.gameId} for player ${client.playerName} (ID: ${client.playerId}) vs Bot.`
-          );
+            sendMessageToClient(client, 'create_game', {
+              idGame: newGame.gameId,
+              // Gracz ludzki to player1Input, który staje się game.players[0], więc jego ID roli to 1.
+              idPlayer: 1,
+            });
+            console.log(
+              `[MessageHandler] Created single player game ${newGame.gameId} for player ${client.playerName} (ID: ${client.playerId}) vs Bot.`
+            );
+          }
         }
         break;
       }
+
 
       case 'add_user_to_room': {
         if (client.playerId === undefined || client.playerName === undefined) {
@@ -273,7 +286,6 @@ export function handleWebSocketMessage(
             errorText: attackResultDetailsFromSwitch.error,
           };
           responseType = 'attack';
-        } else {
         }
         break;
       }
@@ -336,7 +348,6 @@ export function handleWebSocketMessage(
             errorText: attackResultDetailsFromSwitch.error,
           };
           responseType = 'randomAttack';
-        } else {
         }
         break;
       }

@@ -7,11 +7,7 @@ interface ShipInfo {
   length: number;
 }
 
-/**
- * Generuje losowe, poprawne rozmieszczenie statków dla bota.
- * Implementuje prostą strategię losowego umieszczania statków,
- * sprawdzając kolizje.
- */
+
 export function placeBotShips(): Ship[] {
   const shipsToPlace = [
     { type: 'huge', length: 4 },
