@@ -1,16 +1,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as http from 'http';
-// Usunięto import createWebSocketServer, ponieważ inicjalizacja będzie w index.ts
 
 export const httpServer = http.createServer(function (req, res) {
-  // Sprawdź, czy to żądanie uaktualnienia do WebSocket.
-  // Jeśli tak, nie rób nic tutaj - pozwól bibliotece 'ws' obsłużyć zdarzenie 'upgrade'.
   if (
     req.headers.upgrade &&
     req.headers.upgrade.toLowerCase() === 'websocket'
   ) {
-    // Nie wysyłaj odpowiedzi, pozwól 'ws' przejąć.
     return;
   }
 

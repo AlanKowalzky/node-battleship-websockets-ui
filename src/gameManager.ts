@@ -1,29 +1,26 @@
 import WebSocket from 'ws';
-import { RoomUser } from './roomManager.js'; // Załóżmy, że RoomUser jest eksportowany
 
 export interface Ship {
   position: {
     x: number;
     y: number;
   };
-  direction: boolean; // true for horizontal, false for vertical
+  direction: boolean;
   length: number;
   type: 'small' | 'medium' | 'large' | 'huge';
-  hits: boolean[]; // Tablica trafień dla każdego segmentu
+  hits: boolean[];
 }
 
 export interface Shot {
   x: number;
   y: number;
-  result: 'miss' | 'shot' | 'killed'; // 'killed' indicates the shot that sunk the ship
-  // shipType?: Ship['type']; // Optional: If 'killed', what type of ship was it? Client can deduce from ship object.
+  result: 'miss' | 'shot' | 'killed';
 }
 
 export interface PlayerBoard {
   ships: Ship[];
-  // Można dodać tutaj planszę strzałów, jeśli chcemy ją przechowywać po stronie serwera
-  // shots: { x: number; y: number; result: 'miss' | 'hit' | 'sunk' }[];
-  shotsReceived: Shot[]; // Shots made by the opponent on this player's board
+
+  shotsReceived: Shot[];
 }
 
 export interface Game {
@@ -35,28 +32,27 @@ export interface Game {
       board: PlayerBoard;
       ws?: WebSocket;
       isBot?: boolean;
-    }, // Gracz 1 (może być botem)
+    },
     {
       playerId: number;
       playerName: string;
       board: PlayerBoard;
       ws?: WebSocket;
       isBot?: boolean;
-    }, // Gracz 2 (może być botem)
+    },
   ];
-  currentPlayerIndex: number; // 0 dla gracza 1, 1 dla gracza 2
+  currentPlayerIndex: number;
   status: 'pending_ships' | 'playing' | 'finished';
-  winner?: number; // playerId of the winner
+  winner?: number;
 }
 
 const activeGames = new Map<number, Game>();
 
-// Definicja typu dla gracza przekazywanego do createNewGame
 interface GamePlayerInput {
   playerId: number;
   playerName: string;
-  ws?: WebSocket; // Opcjonalne, bot nie będzie miał ws
-  isBot?: boolean; // Flaga wskazująca, czy to bot
+  ws?: WebSocket;
+  isBot?: boolean;
 }
 
 export function createNewGame(
@@ -65,13 +61,11 @@ export function createNewGame(
   player2Input: GamePlayerInput
 ): Game {
   if (activeGames.has(gameId)) {
-    // To nie powinno się zdarzyć, jeśli gameId jest unikalne
     console.warn(
       `[GameManager] Game with ID ${gameId} already exists. Overwriting.`
     );
   }
 
-  // Przygotuj obiekty graczy dla stanu gry, inicjalizując plansze
   const p1GameData = {
     ...player1Input,
     board: { ships: [], shotsReceived: [] },
@@ -99,7 +93,7 @@ export function createNewGame(
         isBot?: boolean;
       },
     ],
-    currentPlayerIndex: Math.random() < 0.5 ? 0 : 1, // Losowo wybierz, kto zaczyna
+    currentPlayerIndex: Math.random() < 0.5 ? 0 : 1,
     status: 'pending_ships',
   };
 
@@ -125,7 +119,6 @@ export function addShipsToGame(
     return { error: 'Player not found in this game' };
   }
 
-  // Sprawdź, czy plansza już istnieje i ma statki (dla pewności, choć logika powinna tego unikać)
   if (
     game.players[playerIndex].board &&
     game.players[playerIndex].board.ships.length > 0
@@ -141,7 +134,6 @@ export function addShipsToGame(
     `[GameManager] Ships added for player ${game.players[playerIndex].playerName} (ID: ${playerId}) in game ${gameId}`
   );
 
-  // Sprawdź, czy obaj gracze dodali statki
   if (
     game.players[0].board?.ships.length &&
     game.players[1].board?.ships.length
@@ -155,7 +147,6 @@ export function addShipsToGame(
   return { game };
 }
 
-// Helper function to format ships on a board for logging
 function formatShipsForLog(ships: Ship[], boardSize = 10): string {
   const board: string[][] = Array(boardSize)
     .fill(null)
@@ -163,13 +154,10 @@ function formatShipsForLog(ships: Ship[], boardSize = 10): string {
 
   ships.forEach((ship) => {
     for (let i = 0; i < ship.length; i++) {
-      // ODWRÓCONA LOGIKA KIERUNKU: true = pionowy, false = poziomy
-      // Jeśli direction jest true (pionowy), y rośnie.
-      // Jeśli direction jest false (poziomy), x rośnie.
       const x = ship.position.x + (ship.direction ? 0 : i);
       const y = ship.position.y + (ship.direction ? i : 0);
       if (x >= 0 && x < boardSize && y >= 0 && y < boardSize) {
-        board[y][x] = 'X'; // Mark ship segment
+        board[y][x] = 'X';
       }
     }
   });
@@ -192,26 +180,22 @@ function getShipAtCoordinates(
   console.log(
     `[getShipAtCoordinates] Checking for ship at Target Coords: (${coordinates.x}, ${coordinates.y})`
   );
-  // console.log(`[getShipAtCoordinates] Full ships array being checked: ${JSON.stringify(ships, null, 2)}`); // Można odkomentować dla pełnego obrazu
 
   for (const ship of ships) {
     console.log(
       `[getShipAtCoordinates] Iterating ship: type=${ship.type}, len=${ship.length}, pos=(${ship.position.x},${ship.position.y}), dir=${ship.direction}`
     );
     for (let i = 0; i < ship.length; i++) {
-      if (ship.hits[i]) continue; // Jeśli segment już trafiony, nie można go trafić ponownie (opcjonalna optymalizacja)
+      if (ship.hits[i]) continue;
 
-      // ODWRÓCONA LOGIKA KIERUNKU: true = pionowy, false = poziomy
-      // Jeśli direction jest true (pionowy), y rośnie.
-      // Jeśli direction jest false (poziomy), x rośnie.
       const shipX = ship.position.x + (ship.direction ? 0 : i);
       const shipY = ship.position.y + (ship.direction ? i : 0);
-      // console.log(`[getShipAtCoordinates]   Ship segment ${i}: (${shipX}, ${shipY})`); // Mniej gadatliwe, odkomentuj w razie potrzeby
+
       if (shipX === coordinates.x && shipY === coordinates.y) {
         console.log(
           `[getShipAtCoordinates]   >>> HIT on ship type ${ship.type} at segment ${i} (${shipX},${shipY})! Target Coords: (${coordinates.x},${coordinates.y})`
         );
-        return { ship, segmentIndex: i }; // Zwróć statek i indeks trafionego segmentu
+        return { ship, segmentIndex: i };
       }
     }
   }
@@ -222,33 +206,26 @@ function getShipAtCoordinates(
 }
 
 function isShipKilled(ship: Ship): boolean {
-  // Teraz sprawdzamy bezpośrednio tablicę hits
   return ship.hits.every((hit) => hit === true);
 }
 
 function markSurroundingCellsAsMiss(board: PlayerBoard, ship: Ship): void {
-  const boardSize = 10; // Załóżmy rozmiar planszy 10x10
+  const boardSize = 10;
   for (let i = 0; i < ship.length; i++) {
-    // ODWRÓCONA LOGIKA KIERUNKU: true = pionowy, false = poziomy
-    // Jeśli direction jest true (pionowy), y rośnie.
-    // Jeśli direction jest false (poziomy), x rośnie.
     const shipX = ship.position.x + (ship.direction ? 0 : i);
     const shipY = ship.position.y + (ship.direction ? i : 0);
 
-    // Sprawdź 8 sąsiadów + samą komórkę (choć sama komórka już jest trafiona)
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
         const checkX = shipX + dx;
         const checkY = shipY + dy;
 
-        // Sprawdź granice planszy
         if (
           checkX >= 0 &&
           checkX < boardSize &&
           checkY >= 0 &&
           checkY < boardSize
         ) {
-          // Sprawdź, czy pole nie było już strzelane
           const alreadyShot = board.shotsReceived.some(
             (s) => s.x === checkX && s.y === checkY
           );
@@ -355,7 +332,7 @@ export function handleAttack(
     const { ship: hitShip, segmentIndex } = hitResult;
 
     attackResult = 'shot';
-    turnChanged = false; // Player continues turn on hit
+    turnChanged = false;
     console.log(
       `[handleAttack] HIT confirmed by handleAttack. turnChanged is now: ${turnChanged}. Player ${attackingPlayerId} continues turn.`
     );
@@ -363,22 +340,18 @@ export function handleAttack(
       `[handleAttack] Details of hit ship (as returned by getShipAtCoordinates): ${JSON.stringify(hitShip, null, 2)}`
     );
 
-    // Record the shot
     defendingPlayer.board.shotsReceived.push({
       x: coordinates.x,
       y: coordinates.y,
       result: 'shot',
     });
-    hitShip.hits[segmentIndex] = true; // Zaktualizuj tablicę trafień statku
+    hitShip.hits[segmentIndex] = true;
 
     if (isShipKilled(hitShip)) {
       attackResult = 'killed';
       shipKilled = hitShip;
-      // Update all shots for this ship to 'killed' status
+
       for (let i = 0; i < hitShip.length; i++) {
-        // ODWRÓCONA LOGIKA KIERUNKU: true = pionowy, false = poziomy
-        // Jeśli direction jest true (pionowy), y rośnie.
-        // Jeśli direction jest false (poziomy), x rośnie.
         const shipX = hitShip.position.x + (hitShip.direction ? 0 : i);
         const shipY = hitShip.position.y + (hitShip.direction ? i : 0);
         const shotIndex = defendingPlayer.board.shotsReceived.findIndex(
@@ -391,7 +364,7 @@ export function handleAttack(
       console.log(
         `[GameManager] Ship killed: ${hitShip.type} in game ${gameId}`
       );
-      // Oznacz komórki wokół zatopionego statku jako 'miss' na planszy broniącego się
+
       markSurroundingCellsAsMiss(defendingPlayer.board, hitShip);
     }
   } else {
@@ -405,7 +378,6 @@ export function handleAttack(
 
   let winner: number | undefined = undefined;
   if (attackResult === 'killed' || attackResult === 'shot') {
-    // Check win only if it was a hit
     if (checkWinCondition(defendingPlayer.board)) {
       winner = attackingPlayerId;
       game.status = 'finished';
@@ -448,7 +420,7 @@ export function handleRandomAttack(
 ): AttackResultDetails {
   const game = activeGames.get(gameId);
   if (!game) return { error: 'Game not found' } as AttackResultDetails;
-  // Podstawowe walidacje (tura, status gry) są w handleAttack, ale możemy je powtórzyć lub uprościć
+
   if (game.status !== 'playing')
     return { error: 'Game is not active' } as AttackResultDetails;
   const attackingPlayerIndex = game.players.findIndex(
@@ -469,7 +441,6 @@ export function handleRandomAttack(
 
   const availableCoordinates: { x: number; y: number }[] = [];
   for (let x = 0; x < 10; x++) {
-    // Zakładamy planszę 10x10
     for (let y = 0; y < 10; y++) {
       if (
         !defendingPlayerBoard.shotsReceived.some(
@@ -482,7 +453,6 @@ export function handleRandomAttack(
   }
 
   if (availableCoordinates.length === 0) {
-    // Wszystkie pola zostały ostrzelane - to nie powinno się zdarzyć przed końcem gry
     return {
       error: 'No available cells to shoot at (all cells shot)',
     } as AttackResultDetails;
@@ -494,9 +464,9 @@ export function handleRandomAttack(
   console.log(
     `[GameManager] Random attack for player ${attackingPlayerId} in game ${gameId} chose coordinates (${randomCoordinates.x},${randomCoordinates.y})`
   );
-  // Wywołaj standardową logikę ataku z wylosowanymi koordynatami
+
   const result = handleAttack(gameId, attackingPlayerId, randomCoordinates);
-  // handleAttack już loguje swój separator, więc tutaj nie musimy dodawać kolejnego, chyba że chcemy odróżnić koniec randomAttack od końca samego ataku.
+
   return result;
 }
 
@@ -512,18 +482,15 @@ export function removeGame(gameId: number): boolean {
   return deleted;
 }
 
-// Funkcja do debugowania (opcjonalna)
 export function getAllGames(): Game[] {
   return Array.from(activeGames.values());
 }
 
-// Funkcja do resetowania stanu na potrzeby testów (opcjonalna)
 export function resetGameManager() {
   activeGames.clear();
   console.log('[GameManager] Game manager has been reset.');
 }
 
-// Nowa funkcja do znalezienia gry po ID gracza
 export function findGameByPlayerId(playerId: number): Game | undefined {
   for (const game of activeGames.values()) {
     if (game.players.some((p) => p.playerId === playerId)) {

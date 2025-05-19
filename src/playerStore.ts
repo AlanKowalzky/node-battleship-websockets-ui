@@ -1,7 +1,7 @@
 export interface Player {
   id: number;
   name: string;
-  password: string; // W rzeczywistej aplikacji hasła powinny być hashowane!
+  password: string;
   wins: number;
 }
 
@@ -16,21 +16,19 @@ export function registerOrLoginPlayer(
   const existingPlayer = playersByName.get(name);
 
   if (existingPlayer) {
-    // Gracz istnieje, próba logowania
     if (existingPlayer.password === password) {
       return { player: existingPlayer, isNewPlayer: false };
     } else {
       return { error: 'Invalid password' };
     }
   } else {
-    // Nowy gracz, rejestracja
     if (name.trim() === '' || password.trim() === '') {
       return { error: 'Username and password cannot be empty' };
     }
     const newPlayer: Player = {
       id: nextPlayerId++,
       name,
-      password, // Pamiętaj o hashowaniu w prawdziwej aplikacji
+      password,
       wins: 0,
     };
     playersById.set(newPlayer.id, newPlayer);
@@ -48,7 +46,7 @@ export function getPlayerById(id: number): Player | undefined {
 
 export function getWinnersList(): { name: string; wins: number }[] {
   const allPlayers = Array.from(playersById.values());
-  // Sortuj malejąco według liczby zwycięstw
+
   allPlayers.sort((a, b) => b.wins - a.wins);
   return allPlayers.map(({ name, wins }) => ({ name, wins }));
 }
@@ -65,12 +63,10 @@ export function incrementWins(playerId: number): boolean {
   return false;
 }
 
-// Funkcja do debugowania (opcjonalna)
 export function getAllPlayers(): Player[] {
   return Array.from(playersById.values());
 }
 
-// Funkcja do resetowania stanu na potrzeby testów (opcjonalna)
 export function resetPlayerStore() {
   playersById.clear();
   playersByName.clear();

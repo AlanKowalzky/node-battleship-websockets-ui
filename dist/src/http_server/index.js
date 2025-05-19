@@ -61,13 +61,10 @@ const fs = __importStar(require('fs'));
 const path = __importStar(require('path'));
 const http = __importStar(require('http'));
 exports.httpServer = http.createServer(function (req, res) {
-  // Sprawdź, czy to żądanie uaktualnienia do WebSocket.
-  // Jeśli tak, nie rób nic tutaj - pozwól bibliotece 'ws' obsłużyć zdarzenie 'upgrade'.
   if (
     req.headers.upgrade &&
     req.headers.upgrade.toLowerCase() === 'websocket'
   ) {
-    // Nie wysyłaj odpowiedzi, pozwól 'ws' przejąć.
     return;
   }
   const __dirname = path.resolve(path.dirname(''));
