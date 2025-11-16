@@ -68,16 +68,14 @@ export async function createWebSocketServer(
           '[WebSocket] Failed to parse message or handle request:',
           error
         );
-        const errorResponse = {
-          type: 'error',
-          data: { message: 'Invalid message format or error processing' },
-          id: parsedMessage?.id || 0,
-        };
         sendMessageToClient(
           client,
           'error',
-          errorResponse.data,
-          errorResponse.id
+          { message: 'Invalid message format or error processing' },
+          0
+        );
+        console.log(
+          `[WebSocket] Command parsing failed. Error: ${error instanceof Error ? error.message : 'Unknown error'}`
         );
       }
     });

@@ -29,7 +29,6 @@ interface AttackMessagePayload {
   position: { x: number; y: number };
   currentPlayer: number;
   status: 'miss' | 'shot' | 'killed';
-  ship?: gameManager.Ship;
 }
 
 interface HasOptionalError {
@@ -366,9 +365,13 @@ export function handleWebSocketMessage(
     }
 
     if (responseData) {
-      sendMessageToClient(client, responseType, responseData, id);
+      sendMessageToClient(client, responseType, responseData, 0);
       console.log(
-        `[MessageHandler] Sent response for command ${responseType}, ID: ${id}, Response Data: ${JSON.stringify(responseData as HasOptionalError)}`
+        `[MessageHandler] Command ${type} processed. Result: ${JSON.stringify(responseData as HasOptionalError)}`
+      );
+    } else {
+      console.log(
+        `[MessageHandler] Command ${type} processed successfully (no response data).`
       );
     }
 
@@ -420,7 +423,7 @@ export function handleWebSocketMessage(
     if (
       type === 'add_ships' &&
       responseType !== 'error' &&
-      responseData?.error !== true
+      !(responseData as HasOptionalError)?.error
     ) {
       if (!data) return;
       console.log(
@@ -499,15 +502,38 @@ export function handleWebSocketMessage(
           currentPlayer: attackResultDetailsFromSwitch.attackingPlayerId,
           status: attackResultDetailsFromSwitch.result,
         };
-        if (attackResultDetailsFromSwitch.shipKilled) {
-          attackMessagePayload.ship = attackResultDetailsFromSwitch.shipKilled;
-        }
         game.players.forEach((p: (typeof game.players)[0]) => {
           if (p.ws) sendMessageToClient(p.ws, 'attack', attackMessagePayload);
         });
         console.log(
           `[MessageHandler] Broadcasted 'attack' for game ${attackResultDetailsFromSwitch.gameId}: ${JSON.stringify(attackMessagePayload)}`
         );
+
+        // Po zatopieniu statku wyślij wiadomości "miss" dla wszystkich otaczających komórek
+        if (
+          attackResultDetailsFromSwitch &&
+          attackResultDetailsFromSwitch.result === 'killed' &&
+          attackResultDetailsFromSwitch.surroundingMissCells &&
+          attackResultDetailsFromSwitch.surroundingMissCells.length > 0
+        ) {
+          const attackDetails = attackResultDetailsFromSwitch;
+          const surroundingCells = attackDetails.surroundingMissCells;
+          if (surroundingCells) {
+            surroundingCells.forEach((cell) => {
+              const missPayload: AttackMessagePayload = {
+                position: { x: cell.x, y: cell.y },
+                currentPlayer: attackDetails.attackingPlayerId,
+                status: 'miss',
+              };
+              game.players.forEach((p: (typeof game.players)[0]) => {
+                if (p.ws) sendMessageToClient(p.ws, 'attack', missPayload);
+              });
+              console.log(
+                `[MessageHandler] Broadcasted 'miss' for surrounding cell (${cell.x},${cell.y}) after ship kill in game ${attackDetails.gameId}`
+              );
+            });
+          }
+        }
 
         if (game.status === 'finished' && game.winner !== undefined) {
           const winnerId = game.winner;
@@ -597,9 +623,6 @@ export function handleWebSocketMessage(
         currentPlayer: botAttackResultDetails.attackingPlayerId,
         status: botAttackResultDetails.result,
       };
-      if (botAttackResultDetails.shipKilled) {
-        attackMessagePayload.ship = botAttackResultDetails.shipKilled;
-      }
 
       const humanPlayer = game.players.find((p) => !p.isBot);
       if (humanPlayer?.ws) {
@@ -607,6 +630,28 @@ export function handleWebSocketMessage(
         console.log(
           `[MessageHandler] Sent 'attack' from Bot for game ${gameId}: ${JSON.stringify(attackMessagePayload)}`
         );
+      }
+
+      // Po zatopieniu statku przez bota wyślij wiadomości "miss" dla wszystkich otaczających komórek
+      if (
+        botAttackResultDetails.result === 'killed' &&
+        botAttackResultDetails.surroundingMissCells &&
+        botAttackResultDetails.surroundingMissCells.length > 0 &&
+        humanPlayer?.ws
+      ) {
+        botAttackResultDetails.surroundingMissCells.forEach((cell) => {
+          const missPayload: AttackMessagePayload = {
+            position: { x: cell.x, y: cell.y },
+            currentPlayer: botAttackResultDetails.attackingPlayerId,
+            status: 'miss',
+          };
+          if (humanPlayer.ws) {
+            sendMessageToClient(humanPlayer.ws, 'attack', missPayload);
+          }
+          console.log(
+            `[MessageHandler] Sent 'miss' for surrounding cell (${cell.x},${cell.y}) after bot ship kill in game ${gameId}`
+          );
+        });
       }
 
       if (
@@ -622,6 +667,7 @@ export function handleWebSocketMessage(
             `[MessageHandler] Sent 'finish' from Bot for game ${game.gameId}: ${JSON.stringify(finishPayload)}`
           );
         }
+        playerStore.incrementWins(winnerId); // Dodano inkrementację zwycięstw
 
         shouldSendUpdateWinners = true;
         gameManager.removeGame(game.gameId);
@@ -665,6 +711,11 @@ export function handleWebSocketMessage(
       console.log('[MessageHandler] Triggered update_room broadcast.');
       shouldSendUpdateRoom = false;
     }
+    if (shouldSendUpdateWinners) {
+      sendUpdateWinners(wss);
+      console.log('[MessageHandler] Triggered update_winners broadcast from main handler.');
+      shouldSendUpdateWinners = false;
+    }
   } catch (error) {
     console.error(
       `[MessageHandler] Error processing message type ${type}:`,
@@ -674,7 +725,10 @@ export function handleWebSocketMessage(
       error instanceof Error
         ? error.message
         : 'Unknown error processing request';
-    sendMessageToClient(client, type, { error: true, errorText }, id);
+    sendMessageToClient(client, type, { error: true, errorText }, 0);
+    console.log(
+      `[MessageHandler] Command ${type} failed. Error: ${errorText}`
+    );
   } finally {
     console.log(
       `------------------------------------- Message Handling End (Type: ${type}) -------------------------------------`

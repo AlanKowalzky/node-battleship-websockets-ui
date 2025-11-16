@@ -209,8 +209,13 @@ function isShipKilled(ship: Ship): boolean {
   return ship.hits.every((hit) => hit === true);
 }
 
-function markSurroundingCellsAsMiss(board: PlayerBoard, ship: Ship): void {
+function markSurroundingCellsAsMiss(
+  board: PlayerBoard,
+  ship: Ship
+): { x: number; y: number }[] {
   const boardSize = 10;
+  const surroundingCells: { x: number; y: number }[] = [];
+  
   for (let i = 0; i < ship.length; i++) {
     const shipX = ship.position.x + (ship.direction ? 0 : i);
     const shipY = ship.position.y + (ship.direction ? i : 0);
@@ -231,6 +236,7 @@ function markSurroundingCellsAsMiss(board: PlayerBoard, ship: Ship): void {
           );
           if (!alreadyShot) {
             board.shotsReceived.push({ x: checkX, y: checkY, result: 'miss' });
+            surroundingCells.push({ x: checkX, y: checkY });
             console.log(
               `[GameManager] Marked surrounding cell (${checkX},${checkY}) as miss for ship type ${ship.type}`
             );
@@ -239,6 +245,8 @@ function markSurroundingCellsAsMiss(board: PlayerBoard, ship: Ship): void {
       }
     }
   }
+  
+  return surroundingCells;
 }
 
 function checkWinCondition(defendingPlayerBoard: PlayerBoard): boolean {
@@ -257,6 +265,7 @@ export interface AttackResultDetails {
   coordinates: { x: number; y: number };
   result: 'miss' | 'shot' | 'killed';
   shipKilled?: Ship;
+  surroundingMissCells?: { x: number; y: number }[];
   turnChanged: boolean;
   nextPlayerId: number;
   winner?: number;
@@ -318,6 +327,7 @@ export function handleAttack(
 
   let attackResult: 'miss' | 'shot' | 'killed' = 'miss';
   let shipKilled: Ship | undefined = undefined;
+  let surroundingMissCells: { x: number; y: number }[] | undefined = undefined;
   let turnChanged = true;
 
   const hitResult = getShipAtCoordinates(
@@ -365,7 +375,10 @@ export function handleAttack(
         `[GameManager] Ship killed: ${hitShip.type} in game ${gameId}`
       );
 
-      markSurroundingCellsAsMiss(defendingPlayer.board, hitShip);
+      surroundingMissCells = markSurroundingCellsAsMiss(
+        defendingPlayer.board,
+        hitShip
+      );
     }
   } else {
     attackResult = 'miss';
@@ -408,6 +421,7 @@ export function handleAttack(
     coordinates,
     result: attackResult,
     shipKilled,
+    surroundingMissCells,
     turnChanged,
     nextPlayerId,
     winner,

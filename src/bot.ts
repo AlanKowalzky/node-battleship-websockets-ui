@@ -7,6 +7,58 @@ interface ShipInfo {
   length: number;
 }
 
+// Helper function to get the bounding box of a ship
+function getShipBoundingBox(ship: Ship): { xMin: number; yMin: number; xMax: number; yMax: number } {
+  if (ship.direction) { // True: Vertical (length along Y axis)
+    return {
+      xMin: ship.position.x,
+      yMin: ship.position.y,
+      xMax: ship.position.x, // Stays in the same column
+      yMax: ship.position.y + ship.length - 1,
+    };
+  } else { // False: Horizontal (length along X axis)
+    return {
+      xMin: ship.position.x,
+      yMin: ship.position.y,
+      xMax: ship.position.x + ship.length - 1,
+      yMax: ship.position.y, // Stays in the same row
+    };
+  }
+}
+
+function isPlacementValid(newShip: Ship, existingShips: Ship[], boardSize: number): boolean {
+  // 1. Boundary checks for newShip
+  if (newShip.position.x < 0 || newShip.position.y < 0) {
+    return false;
+  }
+  if (newShip.direction) { // True: Vertical
+    if (newShip.position.x >= boardSize || newShip.position.y + newShip.length > boardSize) {
+      return false;
+    }
+  } else { // False: Horizontal
+    if (newShip.position.x + newShip.length > boardSize || newShip.position.y >= boardSize) {
+      return false;
+    }
+  }
+
+  // 2. Check for collision or touching with existing ships
+  const newShipBB = getShipBoundingBox(newShip);
+
+  for (const existingShip of existingShips) {
+    const existingShipBB = getShipBoundingBox(existingShip);
+
+    const tooClose =
+      existingShipBB.xMin <= newShipBB.xMax + 1 &&
+      existingShipBB.xMax >= newShipBB.xMin - 1 &&
+      existingShipBB.yMin <= newShipBB.yMax + 1 &&
+      existingShipBB.yMax >= newShipBB.yMin - 1;
+
+    if (tooClose) {
+      return false; // Ships are too close or overlapping
+    }
+  }
+  return true; // Placement is valid
+}
 
 export function placeBotShips(): Ship[] {
   const shipsToPlace = [
@@ -24,39 +76,12 @@ export function placeBotShips(): Ship[] {
 
   const placedShips: Ship[] = [];
 
-  const isPlacementValid = (ship: Ship, existingShips: Ship[]): boolean => {
-    if (ship.direction) {
-      if (ship.position.x + ship.length > BOARD_SIZE) return false;
-    } else {
-      if (ship.position.y + ship.length > BOARD_SIZE) return false;
-    }
-
-    for (const existingShip of existingShips) {
-      for (let i = -1; i <= ship.length; i++) {
-        for (let j = -1; j <= 1; j++) {
-          const newShipX = ship.position.x + (ship.direction ? i : j);
-          const newShipY = ship.position.y + (ship.direction ? j : i);
-
-          for (let ei = 0; ei < existingShip.length; ei++) {
-            const existingShipX =
-              existingShip.position.x + (existingShip.direction ? ei : 0);
-            const existingShipY =
-              existingShip.position.y + (existingShip.direction ? 0 : ei);
-
-            if (newShipX === existingShipX && newShipY === existingShipY) {
-              return false;
-            }
-          }
-        }
-      }
-    }
-    return true;
-  };
-
   for (const shipInfo of shipsToPlace as ShipInfo[]) {
     let placed = false;
     let attempts = 0;
-    while (!placed && attempts < 1000) {
+    // Zwiększono liczbę prób, aby dać więcej szans na znalezienie miejsca
+    // przy bardziej restrykcyjnych zasadach (statki nie mogą się stykać)
+    while (!placed && attempts < 2000) {
       const newShip: Ship = {
         position: {
           x: Math.floor(Math.random() * BOARD_SIZE),
@@ -67,7 +92,7 @@ export function placeBotShips(): Ship[] {
         type: shipInfo.type,
         hits: Array(shipInfo.length).fill(false),
       };
-      if (isPlacementValid(newShip, placedShips)) {
+      if (isPlacementValid(newShip, placedShips, BOARD_SIZE)) {
         placedShips.push(newShip);
         placed = true;
       }
